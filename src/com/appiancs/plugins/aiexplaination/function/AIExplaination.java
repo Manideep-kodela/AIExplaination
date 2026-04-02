@@ -29,46 +29,44 @@ import java.util.Map;
 @AppianScriptingFunctionsCategory
 public class AIExplaination {
 
-    private static final String GROQ_URL   = "https://api.groq.com/openai/v1/chat/completions";
-    private static final String GROQ_MODEL = "llama-3.3-70b-versatile";
+    private static final String GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions";
+    private static final String GROQ_MODEL   = "llama-3.3-70b-versatile";
+    private static final String GROQ_API_KEY = "<YOUR_GROQ_API_KEY>";
 
     @Function
     public String explainAppianObject(
             @Parameter String objectType,
-            @Parameter String objectName,
-            @Parameter String groqApiKey) {
+            @Parameter String objectName) {
 
         if (objectType == null || objectType.trim().isEmpty())
             return "ERROR: objectType is required. Supported: ProcessModel, Interface, ExpressionRule, Integration, RecordType, CDT";
         if (objectName == null || objectName.trim().isEmpty())
             return "ERROR: objectName is required.";
-        if (groqApiKey == null || groqApiKey.trim().isEmpty())
-            return "ERROR: groqApiKey is required as the third parameter.";
 
         String norm = objectType.trim().toLowerCase().replaceAll("[^a-z]", "");
         try {
             switch (norm) {
                 case "processmodel": case "process":
-                    return explainProcessModel(objectName, groqApiKey);
+                    return explainProcessModel(objectName);
                 case "interface": case "ui": case "form": case "sail":
-                    return explainContent(objectName, "Interface", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_INTERFACE, groqApiKey);
+                    return explainContent(objectName, "Interface", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_INTERFACE);
                 case "expressionrule": case "rule": case "expression":
-                    return explainContent(objectName, "Expression Rule", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_FREEFORM, groqApiKey);
+                    return explainContent(objectName, "Expression Rule", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_FREEFORM);
                 case "integration": case "api":
-                    return explainContent(objectName, "Integration", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_OUTBOUND_INTEGRATION, groqApiKey);
+                    return explainContent(objectName, "Integration", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_OUTBOUND_INTEGRATION);
                 case "recordtype": case "record":
-                    return explainContent(objectName, "Record Type", ContentConstants.TYPE_CUSTOM, -1, groqApiKey);
+                    return explainContent(objectName, "Record Type", ContentConstants.TYPE_CUSTOM, -1);
                 case "cdt": case "customdatatype": case "datatype":
-                    return explainContent(objectName, "CDT", ContentConstants.TYPE_CUSTOM, -1, groqApiKey);
+                    return explainContent(objectName, "CDT", ContentConstants.TYPE_CUSTOM, -1);
                 default:
                     return "Unsupported object type: '" + objectType + "'. Supported: ProcessModel, Interface, ExpressionRule, Integration, RecordType, CDT";
             }
         } catch (Exception e) {
-            return "ERROR: " + e.getMessage();
+            return "ERROR: " + e.getClass().getSimpleName() + " - " + e.getMessage();
         }
     }
 
-    private String explainProcessModel(String name, String apiKey) throws Exception {
+    private String explainProcessModel(String name) throws Exception {
         ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
         ProcessDesignService pds = ServiceLocator.getProcessDesignService(sc);
 
@@ -124,7 +122,7 @@ public class AIExplaination {
             }
         }
 
-        metadata.append("NODES (STEPS IN THE PROCESS):\n");
+        metadata.append("NODES:\n");
         if (nodes != null) {
             for (ProcessNode n : nodes) {
                 String nName    = extractLocaleName(safeInvoke(n, "getFriendlyName"));
@@ -147,10 +145,10 @@ public class AIExplaination {
                     } catch (Exception ignored) {}
                 }
 
-                metadata.append("\n  NODE: ").append(nName).append(isStart ? " [START NODE]" : "").append("\n");
+                metadata.append("\n  NODE: ").append(nName).append(isStart ? " [START]" : "").append("\n");
                 metadata.append("    Smart Service: ").append(schemaName).append("\n");
                 if (!schemaDesc.isEmpty())
-                    metadata.append("    Smart Service Description: ").append(schemaDesc).append("\n");
+                    metadata.append("    Description: ").append(schemaDesc).append("\n");
 
                 Object[] params = ac != null ? (Object[]) safeInvoke(ac, "getParameters") : null;
                 if (params != null && params.length > 0) {
@@ -167,7 +165,7 @@ public class AIExplaination {
                 if (outputs != null) {
                     for (String o : outputs) {
                         if (o != null && !o.trim().isEmpty())
-                            metadata.append("    Output saved to: ").append(o.trim()).append("\n");
+                            metadata.append("    Output: ").append(o.trim()).append("\n");
                     }
                 }
 
@@ -178,8 +176,7 @@ public class AIExplaination {
                             UiExpressionForm uef = fc.getUiExpressionForm();
                             if (uef != null && uef.getExpression() != null && !uef.getExpression().trim().isEmpty()) {
                                 String ifRef = extractRuleRef(uef.getExpression().trim());
-                                metadata.append("    Form/Interface used: ")
-                                        .append(ifRef.isEmpty() ? uef.getExpression().trim() : ifRef).append("\n");
+                                metadata.append("    Form: ").append(ifRef.isEmpty() ? uef.getExpression().trim() : ifRef).append("\n");
                             }
                         }
                     }
@@ -190,8 +187,7 @@ public class AIExplaination {
                     metadata.append("    Connects to:\n");
                     for (Connection c : conns) {
                         Long endId = c.getEndNodeGuiId();
-                        String label = c.getLabel() != null && !c.getLabel().isEmpty()
-                            ? " (condition: " + c.getLabel() + ")" : "";
+                        String label = c.getLabel() != null && !c.getLabel().isEmpty() ? " (condition: " + c.getLabel() + ")" : "";
                         String endName = endId != null ? guiIdToName.getOrDefault(endId, "Node-" + endId) : "?";
                         metadata.append("      -> ").append(endName).append(label).append("\n");
                     }
@@ -201,21 +197,15 @@ public class AIExplaination {
 
         String prompt = "You are an expert Appian consultant explaining an Appian Process Model to a fresher "
             + "who has no knowledge of Appian.\n\n"
-            + "Here is the complete technical metadata of the process model:\n\n"
-            + metadata.toString()
-            + "\n\nBased on this metadata, write a detailed, clear, human-readable explanation. Explain:\n"
-            + "1. What is the purpose of this process model and what business problem it solves\n"
-            + "2. What each process variable means and why it is needed\n"
-            + "3. Walk through each node step by step - explain what it does, why it is there, what data it uses, what it produces\n"
-            + "4. Explain the decision gateways - what condition is being checked and what happens in each path\n"
-            + "5. Explain how data flows from one node to the next through process variables\n"
-            + "6. Give a final summary of the complete end-to-end flow\n\n"
-            + "Write it like you are explaining to a client in a meeting. Use simple language. Do not use bullet points - write in full paragraphs.";
+            + "Here is the complete technical metadata:\n\n" + metadata.toString()
+            + "\n\nWrite a detailed human-readable explanation covering: purpose, process variables, "
+            + "each node step by step, decision gateways, data flow, and a final summary. "
+            + "Write like explaining to a client. Use simple language. Full paragraphs only.";
 
-        return callGroq(prompt, apiKey);
+        return callGroq(prompt);
     }
 
-    private String explainContent(String name, String displayType, int type, int subtype, String apiKey) throws Exception {
+    private String explainContent(String name, String displayType, int type, int subtype) throws Exception {
         ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
         ContentService cs = ServiceLocator.getContentService(sc);
 
@@ -240,7 +230,7 @@ public class AIExplaination {
         Object exprObj = found.getAttributes() != null ? found.getAttributes().get("expression") : null;
         if (exprObj != null && !exprObj.toString().trim().isEmpty()) {
             String expr = exprObj.toString().trim();
-            metadata.append("EXPRESSION BODY (first 3000 chars):\n").append(truncate(expr, 3000)).append("\n\n");
+            metadata.append("EXPRESSION (first 3000 chars):\n").append(truncate(expr, 3000)).append("\n\n");
 
             java.util.Set<String> inputs = new java.util.LinkedHashSet<>();
             int idx = 0;
@@ -252,7 +242,7 @@ public class AIExplaination {
                 idx = end;
             }
             if (!inputs.isEmpty())
-                metadata.append("RULE INPUTS DETECTED: ").append(String.join(", ", inputs)).append("\n");
+                metadata.append("RULE INPUTS: ").append(String.join(", ", inputs)).append("\n");
 
             java.util.Set<String> rules = new java.util.LinkedHashSet<>();
             idx = 0;
@@ -264,26 +254,24 @@ public class AIExplaination {
                 idx = end;
             }
             if (!rules.isEmpty())
-                metadata.append("REFERENCED RULES/INTERFACES: ").append(String.join(", ", rules)).append("\n");
+                metadata.append("REFERENCED RULES: ").append(String.join(", ", rules)).append("\n");
         }
 
         String prompt = "You are an expert Appian consultant explaining an Appian " + displayType
             + " to a fresher who has no knowledge of Appian.\n\n"
-            + "Here is the complete technical metadata:\n\n"
-            + metadata.toString()
-            + "\n\nBased on this metadata, write a detailed, clear, human-readable explanation. "
-            + "Explain what this " + displayType + " does, what inputs it takes, what it produces, "
-            + "what other objects it depends on, and how it fits into the overall Appian application. "
-            + "Write it like you are explaining to a client in a meeting. Use simple language. Write in full paragraphs.";
+            + "Here is the complete technical metadata:\n\n" + metadata.toString()
+            + "\n\nWrite a detailed human-readable explanation of what this " + displayType
+            + " does, its inputs, outputs, dependencies, and how it fits in the application. "
+            + "Write like explaining to a client. Use simple language. Full paragraphs only.";
 
-        return callGroq(prompt, apiKey);
+        return callGroq(prompt);
     }
 
-    private String callGroq(String prompt, String apiKey) throws Exception {
+    private String callGroq(String prompt) throws Exception {
         URL url = new URL(GROQ_URL);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
-        conn.setRequestProperty("Authorization", "Bearer " + apiKey);
+        conn.setRequestProperty("Authorization", "Bearer " + GROQ_API_KEY);
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("User-Agent", "Mozilla/5.0");
         conn.setDoOutput(true);
@@ -291,15 +279,12 @@ public class AIExplaination {
         conn.setReadTimeout(60000);
 
         String escapedPrompt = prompt
-            .replace("\\", "\\\\")
-            .replace("\"", "\\\"")
-            .replace("\n", "\\n")
-            .replace("\r", "\\r")
-            .replace("\t", "\\t");
+            .replace("\\", "\\\\").replace("\"", "\\\"")
+            .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
 
         String body = "{\"model\":\"" + GROQ_MODEL + "\","
             + "\"messages\":[{\"role\":\"user\",\"content\":\"" + escapedPrompt + "\"}],"
-            + "\"max_tokens\":2048}";
+            + "\"max_tokens\":1024}";
 
         try (OutputStream os = conn.getOutputStream()) {
             os.write(body.getBytes("UTF-8"));
@@ -328,7 +313,9 @@ public class AIExplaination {
             end++;
         }
         String content = json.substring(start, Math.min(end, json.length()));
-        return content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+        content = content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
+        if (content.length() > 10000) content = content.substring(0, 10000) + "\n\n[Truncated]";
+        return content;
     }
 
     private String normalise(String s) {
@@ -337,26 +324,32 @@ public class AIExplaination {
 
     private Content findContent(ContentService cs, String name, int type, int subtype) throws Exception {
         if (type == ContentConstants.TYPE_RULE) {
-            Long rulesRoot = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
-            Content[] results = cs.getAllChildren(rulesRoot, new ContentFilter(type), ContentConstants.VERSION_CURRENT);
-            if (results != null) {
-                for (Content c : results) {
-                    if (normalise(name).equals(normalise(c.getName()))) {
-                        if (subtype == -1 || (c.getSubtype() != null && c.getSubtype() == subtype))
-                            return c;
+            try {
+                Long rulesRoot = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
+                Content[] results = cs.searchByRoot(rulesRoot, name, new ContentFilter(type));
+                if (results != null) {
+                    for (Content c : results) {
+                        if (normalise(name).equals(normalise(c.getName()))) {
+                            if (subtype == -1 || (c.getSubtype() != null && c.getSubtype() == subtype))
+                                return c;
+                        }
                     }
                 }
-            }
+            } catch (Exception ignored) {}
         }
         if (type == ContentConstants.TYPE_CUSTOM) {
-            Long rtFolder = cs.getIdByUuid(ContentConstants.UUID_SYSTEM_RECORD_TYPES_FOLDER);
-            if (rtFolder != null) {
-                Content[] r = cs.getAllChildren(rtFolder, new ContentFilter(type), ContentConstants.VERSION_CURRENT);
-                if (r != null) for (Content c : r) if (normalise(name).equals(normalise(c.getName()))) return c;
-            }
-            Long knRoot = cs.getSystemId(ContentConstants.KNOWLEDGE_ROOT_SYSTEM_ID);
-            Content[] r2 = cs.getAllChildren(knRoot, new ContentFilter(type), ContentConstants.VERSION_CURRENT);
-            if (r2 != null) for (Content c : r2) if (normalise(name).equals(normalise(c.getName()))) return c;
+            try {
+                Long rtFolder = cs.getIdByUuid(ContentConstants.UUID_SYSTEM_RECORD_TYPES_FOLDER);
+                if (rtFolder != null) {
+                    Content[] r = cs.getChildren(rtFolder, new ContentFilter(type), ContentConstants.VERSION_CURRENT);
+                    if (r != null) for (Content c : r) if (normalise(name).equals(normalise(c.getName()))) return c;
+                }
+            } catch (Exception ignored) {}
+            try {
+                Long knRoot = cs.getSystemId(ContentConstants.KNOWLEDGE_ROOT_SYSTEM_ID);
+                Content[] r2 = cs.searchByRoot(knRoot, name, new ContentFilter(type));
+                if (r2 != null) for (Content c : r2) if (normalise(name).equals(normalise(c.getName()))) return c;
+            } catch (Exception ignored) {}
         }
         return null;
     }
