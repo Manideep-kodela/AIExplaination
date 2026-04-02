@@ -31,7 +31,7 @@ public class AIExplaination {
 
     private static final String GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions";
     private static final String GROQ_MODEL   = "llama-3.3-70b-versatile";
-    private static final String GROQ_API_KEY = "<YOUR_GROQ_API_KEY>";
+    private static final String GROQ_API_KEY = "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";
 
     @Function
     public String explainAppianObject(
