@@ -1,0 +1,4 @@
+com/appiancs/plugins/aiexplaination/aiExplaination.properties
+target/
+*.class
+*.jar
