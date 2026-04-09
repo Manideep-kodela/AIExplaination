@@ -1,0 +1,92 @@
+INVENTION DISCLOSURE DOCUMENT
+==============================
+
+Title of Invention:
+AI-Powered Appian Object Explanation Plugin using Large Language Models
+
+Inventor:
+Name    : Manideep Kodela
+Date    : 2025
+
+---
+
+DESCRIPTION OF INVENTION
+--------------------------
+
+This invention relates to an Appian platform plugin that automatically
+explains Appian application objects (Process Models, Interfaces, Expression
+Rules, Integrations, Record Types, and Custom Data Types) using AI-generated,
+analyst-level structured explanations via a Large Language Model (LLM) API.
+
+---
+
+PROBLEM BEING SOLVED
+---------------------
+
+Appian applications are complex and require significant technical knowledge
+to understand. New team members, business analysts, and non-technical
+stakeholders struggle to understand what each object does, why it exists,
+and how it impacts the business. Manual documentation is time-consuming
+and often outdated.
+
+---
+
+SOLUTION / INNOVATION
+----------------------
+
+A custom Appian plugin function:
+
+    explainAppianObject(objectType, objectName)
+
+- Accepts 2 parameters: object type and object name
+- Automatically fetches metadata from Appian internal services
+  (ContentService, ProcessDesignService, TypeService) using reflection
+- Extracts technical details: fields, nodes, expressions, rule inputs,
+  XSD definitions, process variables, smart services, connections
+- Constructs a structured prompt and sends it to a Groq LLM API
+- Returns a human-readable, analyst-level explanation covering:
+    1. Business Purpose
+    2. Key Functionality
+    3. Inputs
+    4. Outputs
+    5. Internal Logic
+    6. Dependencies
+    7. Business Impact
+    8. Summary
+
+---
+
+KEY TECHNICAL FEATURES
+-----------------------
+
+1. Version-agnostic design using pure Java reflection — works across
+   Appian versions without recompilation
+2. Namespace-based CDT lookup using javax.xml.namespace.QName and
+   TypeService.getTypeByQualifiedName()
+3. Node-by-node Process Model explanation including smart services,
+   data tab inputs, form tab interfaces, and XOR conditions
+4. Automatic prefix extraction from CDT names to derive namespace
+   (e.g. SA_Student -> urn:com:appian:types:SA)
+5. Structured analyst-level output format consistent across all
+   6 supported Appian object types
+
+---
+
+DATE OF CONCEPTION
+-------------------
+
+April 2025
+
+---
+
+SIGNATURE
+----------
+
+Inventor: Manideep Kodela
+Date    : April 2025
+
+---
+
+NOTE: This document is an invention disclosure for record-keeping purposes.
+For formal patent protection, consult a licensed patent attorney and file
+with the appropriate patent office (e.g. USPTO at www.uspto.gov).
