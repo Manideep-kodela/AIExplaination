@@ -32,7 +32,7 @@ public class AIExplaination {
 
     private static final String GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions";
     private static final String GROQ_MODEL   = "llama-3.3-70b-versatile";
-    private static final String GROQ_API_KEY = "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";
+    private static final String GROQ_API_KEY = "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";
 
     @Function
     public String explainAppianObject(
@@ -294,31 +294,60 @@ public class AIExplaination {
             }
         }
 
-        String prompt = "You are the developer who built this Appian Process Model. "
-            + "Explain this process model to a new team member joining your project, "
-            + "as if you are doing a knowledge transfer session.\n\n"
-            + "Here is the complete technical data of the process model you built:\n\n"
-            + metadata.toString()
-            + "\n\nNow explain this process model exactly like a developer doing KT (knowledge transfer). Cover:\n"
-            + "1. What business problem this process solves and when it gets triggered\n"
-            + "2. For each process variable - what data it holds, why you created it, "
-            + "whether it is an input or internal variable and how it flows through the process\n"
-            + "3. For EVERY node - explain:\n"
-            + "   - What this node does in the business context\n"
-            + "   - Which smart service is used and why that specific smart service was chosen\n"
-            + "   - In the DATA tab - what inputs are configured, which process variables are "
-            + "passed as input values, which process variables are used as save values to store the output\n"
-            + "   - In the FORMS tab - which interface is attached, what rule inputs are passed "
-            + "to that interface and what process variables are mapped to those rule inputs\n"
-            + "   - What the node produces and where that output goes next\n"
-            + "4. For XOR gateways - explain what condition is being evaluated, "
-            + "what each path means in business terms\n"
-            + "5. Explain the complete data flow - how data enters, transforms and exits the process\n"
-            + "6. End with a complete business flow summary in plain English\n\n"
-            + "Use the EXACT variable names, node names, interface names, smart service names from the data above. "
-            + "Be very specific and technical. Write in full paragraphs like a developer explaining to another developer.";
+        String header = "OBJECT TYPE: Process Model\n"
+            + "OBJECT NAME: " + pmName + "\n"
+            + "CREATED BY: " + creator + "\n"
+            + "LAST MODIFIED: " + updated + "\n"
+            + "---\n\n";
+        String prompt = "You are a Business Analyst explaining an Appian Process Model to a non-technical stakeholder.\n"
+            + "Based STRICTLY on the data below, generate a structured explanation.\n"
+            + "Do NOT use markdown symbols (##, **, *, --)\n\n"
+            + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
+            + "Answer these sections exactly:\n\n"
+            + "1. PURPOSE\n"
+            + "Why does this process exist? What business problem does it solve?\n\n"
+            + "2. BUSINESS FLOW\n"
+            + "What is the end-to-end business flow?\n"
+            + "Describe each step in plain English like: Request submitted -> Manager reviews -> HR approves\n\n"
+            + "3. START TRIGGER\n"
+            + "How is this process started? (Manual / API / Event / Timer / Form submission)\n\n"
+            + "4. ACTORS\n"
+            + "Who is involved in this process? (e.g., Employee, Manager, HR, System)\n\n"
+            + "5. INPUTS\n"
+            + "What data enters this process? List each input parameter and what it represents.\n\n"
+            + "6. OUTPUTS\n"
+            + "What does this process produce or trigger at the end?\n\n"
+            + "7. NODE-BY-NODE EXPLANATION\n"
+            + "For EVERY node in the process, explain:\n"
+            + "- Node Name: (exact name)\n"
+            + "- Node Type: (User Task / Script Task / Integration / Gateway / Start / End etc.)\n"
+            + "- Business Purpose: Why is this node here? What business action does it perform?\n"
+            + "- Smart Service Used: Which smart service or activity is configured and why was it chosen?\n"
+            + "- Inputs Configured: What data is passed into this node? Which process variables are used as inputs?\n"
+            + "- Outputs / Save Values: What does this node produce? Which process variables store the result?\n"
+            + "- Interface Attached (if any): Which interface is shown to the user? What rule inputs are passed to it?\n"
+            + "- Conditions / Rules (if any): What XOR conditions or routing rules are applied after this node?\n"
+            + "- Next Step: Where does the flow go after this node?\n\n"
+            + "8. LOGIC / DECISION POINTS\n"
+            + "What decisions or conditions exist? (e.g., If approved -> notify employee, If rejected -> send back)\n\n"
+            + "9. DEPENDENCIES\n"
+            + "What interfaces, rules, integrations, or other objects does this process use?\n\n"
+            + "10. BUSINESS IMPACT\n"
+            + "How does this process help the business? What would break if it did not exist?\n\n"
+            + "11. DETAILED SUMMARY\n"
+            + "Write a detailed pin-to-pin summary covering:\n"
+            + "- What triggers this process and why\n"
+            + "- Every major step and what happens at each step\n"
+            + "- What data flows through the process from start to end\n"
+            + "- Who does what at each stage\n"
+            + "- What the final outcome is and how it impacts the business\n"
+            + "Write this as a full paragraph narrative, not bullet points.\n\n"
+            + "RULES:\n"
+            + "- Plain CAPITAL headings, dash (-) for bullets, no markdown\n"
+            + "- Simple English, focus on WHY and WHAT not HOW\n"
+            + "- Use exact node names, variable names, interface names from the data";
 
-        return callGroq(prompt);
+        return header + callGroq(prompt);
     }
 
     private String listCdts() {
@@ -393,23 +422,35 @@ public class AIExplaination {
             }
         }
 
-        String prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst.\n"
-            + "Explain this Appian CDT (Custom Data Type) based STRICTLY on the data provided below.\n\n"
-            + "Here is the technical data:\n\n" + metadata.toString()
-            + "\n\nExplain this CDT in a clear professional KT style covering:\n"
-            + "1. What this CDT represents in the business - what real-world entity or data structure does it model\n"
-            + "2. What FIELDS are defined - for each field explain what business data it holds in plain English\n"
-            + "3. How this CDT is typically used in the application (as process variable, rule input, data store entity etc.)\n\n"
-            + "FORMATTING RULES:\n"
-            + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
-            + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon\n"
-            + "- Use a blank line between sections\n"
-            + "- Use a dash (-) for bullet points\n"
-            + "- If data is not available for a section, skip that section entirely\n"
-            + "- Keep it professional, concise and easy to read\n"
-            + "Use exact field names from the data. Write in plain English. No generic Appian theory.";
+        String cdtHeader = "OBJECT TYPE: CDT (Custom Data Type)\n"
+            + "OBJECT NAME: " + match.getName() + "\n"
+            + "CREATED BY: " + (match.getCreator() != null ? match.getCreator() : "N/A") + "\n"
+            + "CREATED ON: " + (match.getCreatedTimestamp() != null ? match.getCreatedTimestamp().toString() : "N/A") + "\n"
+            + "---\n\n";
+        String prompt = "You are a Business Analyst explaining an Appian CDT to a non-technical stakeholder.\n"
+            + "Based STRICTLY on the data below, generate a structured explanation. No markdown symbols.\n\n"
+            + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
+            + "Answer these sections exactly:\n\n"
+            + "1. PURPOSE\n"
+            + "What real-world entity does this CDT represent? (e.g., Employee, Leave Request, Order)\n\n"
+            + "2. INPUTS\n"
+            + "What fields does this CDT contain? List each field and what business data it stores.\n\n"
+            + "3. OUTPUTS\n"
+            + "What does this CDT produce or return when used in the application?\n\n"
+            + "4. LOGIC / BEHAVIOR\n"
+            + "How is this CDT used? (as process variable, rule input, data store entity, etc.)\n\n"
+            + "5. DEPENDENCIES\n"
+            + "What other CDTs, rules, or objects reference or use this CDT?\n\n"
+            + "6. BUSINESS IMPACT\n"
+            + "How does this CDT help the business? What would break if it did not exist?\n\n"
+            + "7. SUMMARY\n"
+            + "2-3 sentences. Example: Stores employee leave request data including dates, reason, and status.\n\n"
+            + "RULES:\n"
+            + "- Plain CAPITAL headings, dash (-) for bullets, no markdown\n"
+            + "- Simple English, focus on WHY and WHAT\n"
+            + "- Use exact field names from the data";
 
-        return callGroq(prompt);
+        return cdtHeader + callGroq(prompt);
     }
 
     private String explainRecordType(String name, String apiKey) throws Exception {
@@ -491,26 +532,35 @@ public class AIExplaination {
             metadata.append("\n");
         }
 
-        String prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst.\n"
-            + "Explain this Appian Record Type based STRICTLY on the data provided below. Do NOT add anything not in the data.\n\n"
-            + "Here is the technical data:\n\n" + metadata.toString()
-            + "\n\nExplain this Record Type in a clear, professional KT style covering:\n"
-            + "1. What this Record Type represents in the business - explain it like a real business entity\n"
-            + "2. What DATA SOURCE it is connected to (if available)\n"
-            + "3. What FIELDS are defined - for each field explain what business data it holds in plain English (e.g. empId stores the unique identifier of the employee, empName stores the full name of the employee)\n"
-            + "4. What RECORD ACTIONS are configured - list each by exact name (if available)\n"
-            + "5. What RELATIONSHIPS exist with other record types (if available)\n"
-            + "6. A concise business summary of how this record type is used in the application\n\n"
-            + "FORMATTING RULES:\n"
-            + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
-            + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon\n"
-            + "- Use a blank line between sections\n"
-            + "- Use a dash (-) for bullet points\n"
-            + "- If data is not available for a section, skip that section entirely - do not say 'no information provided'\n"
-            + "- Keep it professional, concise and easy to read for a Business Analyst\n"
-            + "Use exact field names from the data. Write in plain English. No generic Appian theory.";
+        String rtHeader = "OBJECT TYPE: Record Type\n"
+            + "OBJECT NAME: " + safeGet(match, "getLocalName", name) + "\n"
+            + "CREATED BY: " + safeGet(match, "getCreator", "N/A") + "\n"
+            + "CREATED ON: " + safeGet(match, "getCreationTime", "N/A") + "\n"
+            + "---\n\n";
+        String prompt = "You are a Business Analyst explaining an Appian Record Type to a non-technical stakeholder.\n"
+            + "Based STRICTLY on the data below, generate a structured explanation. No markdown symbols.\n\n"
+            + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
+            + "Answer these sections exactly:\n\n"
+            + "1. PURPOSE\n"
+            + "What business object does this Record Type represent? (e.g., Leave Request, Employee, Order)\n\n"
+            + "2. INPUTS\n"
+            + "What fields are defined? List each field and what business data it stores.\n\n"
+            + "3. OUTPUTS\n"
+            + "What views, reports, or actions does this Record Type expose to users?\n\n"
+            + "4. LOGIC / BEHAVIOR\n"
+            + "What data source is it connected to? What relationships exist with other record types?\n\n"
+            + "5. DEPENDENCIES\n"
+            + "What actions, interfaces, rules, or other objects are linked to this Record Type?\n\n"
+            + "6. BUSINESS IMPACT\n"
+            + "How does this Record Type help the business? What would break if it did not exist?\n\n"
+            + "7. SUMMARY\n"
+            + "2-3 sentences. Example: Represents leave requests with list view, detail view, and approval actions.\n\n"
+            + "RULES:\n"
+            + "- Plain CAPITAL headings, dash (-) for bullets, no markdown\n"
+            + "- Simple English, focus on WHY and WHAT\n"
+            + "- Use exact field names from the data";
 
-        return callGroq(prompt);
+        return rtHeader + callGroq(prompt);
     }
 
     private String explainContent(String name, String displayType, int type, int subtype) throws Exception {
@@ -578,67 +628,71 @@ public class AIExplaination {
         }
 
 
+        String contentHeader = "OBJECT TYPE: " + displayType + "\n"
+            + "OBJECT NAME: " + objName + "\n"
+            + "CREATED BY: " + creator + "\n"
+            + "CREATED ON: " + created + "\n"
+            + "---\n\n";
+
         String prompt;
         if (displayType.equals("Expression Rule")) {
-            prompt = "Analyze the following Appian Expression Rule and generate a clear, structured explanation.\n\n"
-                + "-----------------------------\n"
-                + "INPUT DATA:\n"
-                + "-----------------------------\n"
-                + "Expression Rule Name: " + objName + "\n\n"
-                + metadata.toString() + "\n"
-                + "-----------------------------\n"
-                + "OUTPUT FORMAT:\n"
-                + "-----------------------------\n"
-                + "Generate the following sections. DO NOT skip any section. DO NOT add sections not listed here.\n\n"
-                + "1. PURPOSE\n"
-                + "- Why this rule exists and what business problem it solves\n\n"
-                + "2. OVERVIEW\n"
-                + "- High-level explanation of what the rule does\n"
-                + "- Type of logic (calculation / validation / transformation / decision-making)\n\n"
-                + "3. RULE INPUTS\n"
-                + "- For each ri! input found in the code: Name, inferred Data Type, what it represents in business terms\n"
-                + "- If no rule inputs exist, write: No rule inputs defined\n\n"
-                + "4. BUSINESS LOGIC EXPLANATION\n"
-                + "- Step-by-step explanation of the logic in plain English\n"
-                + "- Convert technical expressions into business-friendly language\n\n"
-                + "5. KEY CONDITIONS / DECISIONS\n"
-                + "- List every if(), choose(), or conditional logic found\n"
-                + "- Explain what each condition checks and what happens in each case\n"
-                + "- If no conditions exist, write: No conditional logic found\n\n"
-                + "6. OUTPUT / RESULT\n"
-                + "- What the rule returns\n"
-                + "- Possible output values or data type\n\n"
-                + "7. SUMMARY\n"
-                + "- Clear summary of the rule in 3-5 lines\n\n"
-                + "IMPORTANT:\n"
-                + "- Use simple English\n"
-                + "- Do NOT use ##, ###, *, ** or any markdown\n"
-                + "- Write each section heading as a number and title in PLAIN CAPITAL LETTERS\n"
-                + "- Use a dash (-) for bullet points\n"
-                + "- Be precise and easy for a non-developer to understand";
-        } else {
-            prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst who has basic Appian knowledge.\n"
-                + "Explain this Appian " + displayType + " based STRICTLY on the actual code and metadata provided below. Do NOT add anything that is not in the data.\n\n"
-                + "Here is the technical data:\n\n" + metadata.toString()
-                + "\n\nExplain this " + displayType + " in a clear KT style covering:\n"
-                + "1. What is the purpose of this " + displayType + " - what does it do in simple terms\n"
-                + "2. What LAYOUTS are used (e.g. a!formLayout, a!sectionLayout, a!columnsLayout, a!cardLayout etc.) and what they contain\n"
-                + "3. What UI COMPONENTS are used (e.g. a!textField, a!dropdownField, a!buttonWidget, a!gridField, a!recordActionField etc.) - list each one and what it does\n"
-                + "4. What RULE INPUTS (ri!) are defined and how each one is used inside the interface\n"
-                + "5. What RULES (rule!), RECORD TYPES (recordType!), CONSTANTS (cons!) or other objects are referenced - list each by exact name and explain what it does in this interface\n"
-                + "6. What LOGIC or CONDITIONS exist (if(), a!localVariables, local!, choose() etc.) and what they control\n"
-                + "7. What ACTIONS or EVENTS are triggered (saveInto, a!save, submit buttons, record actions etc.)\n"
-                + "8. A simple summary of the full flow - what the analyst sees on screen and what happens when they interact with it\n\n"
+            prompt = "You are a Business Analyst explaining an Appian Expression Rule to a non-technical stakeholder.\n"
+                + "Based STRICTLY on the data provided below, generate a structured explanation.\n"
+                + "Do NOT add anything not present in the data. Do NOT use markdown symbols.\n\n"
+                + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
+                + "Generate output in EXACTLY this structure. Every section is mandatory.\n"
+                + "If data is not available for a section, write: Not applicable\n\n"
+                + "1. BUSINESS PURPOSE\n"
+                + "Explain in 2-3 sentences WHY this rule exists and what business need it fulfills.\n\n"
+                + "2. KEY FUNCTIONALITY\n"
+                + "List the main things this rule does, step by step, in plain English.\n\n"
+                + "3. INPUTS\n"
+                + "List each rule input (ri!), its inferred data type, and what it represents in business terms.\n\n"
+                + "4. OUTPUTS\n"
+                + "What does this rule return or produce?\n\n"
+                + "5. INTERNAL LOGIC\n"
+                + "Explain the decisions, conditions, and flow in simple business terms.\n\n"
+                + "6. DEPENDENCIES\n"
+                + "List other rules, constants, or objects this rule uses.\n\n"
+                + "7. USER INTERACTION\n"
+                + "Describe any user interaction. If none, write: Not applicable\n\n"
+                + "8. EXTERNAL SYSTEMS\n"
+                + "List any external APIs or databases involved. If none, write: Not applicable\n\n"
+                + "9. BUSINESS IMPACT\n"
+                + "How does this rule help the business? What would break if it did not exist?\n\n"
+                + "10. SUMMARY\n"
+                + "Write 2-3 clear sentences summarizing what this rule is and why it matters.\n\n"
                 + "FORMATTING RULES:\n"
-                + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
-                + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon, then explain in normal text below it\n"
-                + "- Use a blank line between sections\n"
+                + "- Use PLAIN CAPITAL section headings exactly as shown above\n"
                 + "- Use a dash (-) for bullet points\n"
-                + "- Keep it professional, clean and easy to read\n"
-                + "Use exact names from the code. Write in plain English. No generic Appian theory.";
+                + "- No markdown, no bold, no code blocks\n"
+                + "- Simple English only";
+        } else {
+            prompt = "You are a Business Analyst explaining an Appian " + displayType + " to a non-technical stakeholder.\n"
+                + "Based STRICTLY on the data below, generate a structured explanation. No markdown symbols.\n\n"
+                + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
+                + "Answer these sections exactly:\n\n"
+                + "1. PURPOSE\n"
+                + "Why does this " + displayType + " exist? What user action or business need does it serve?\n\n"
+                + "2. INPUTS\n"
+                + "What data does the user enter or what parameters does this receive?\n\n"
+                + "3. OUTPUTS\n"
+                + "What happens after submission or execution? What does it produce or trigger?\n\n"
+                + "4. LOGIC / BEHAVIOR\n"
+                + "What happens inside? Describe validations, conditions, dynamic behavior, or API calls in plain English.\n\n"
+                + "5. DEPENDENCIES\n"
+                + "What other rules, CDTs, constants, integrations, or record types does this use?\n\n"
+                + "6. BUSINESS IMPACT\n"
+                + "How does this help the business or user? What would break if it did not exist?\n\n"
+                + "7. SUMMARY\n"
+                + "2-3 sentences describing what this " + displayType + " does in plain business terms.\n\n"
+                + "RULES:\n"
+                + "- Plain CAPITAL headings, dash (-) for bullets, no markdown\n"
+                + "- Simple English, focus on WHY and WHAT\n"
+                + "- Use exact names from the data";
         }
 
-        return callGroq(prompt);
+        return contentHeader + callGroq(prompt);
     }
 
     private String callGroq(String prompt) throws Exception {
