@@ -57,8 +57,6 @@ public class AIExplaination {
                     return explainContent(objectName, "Integration", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_OUTBOUND_INTEGRATION);
                 case "recordtype": case "record":
                     return explainRecordType(objectName, "");
-                case "listcdts":
-                    return listCdts();
                 case "cdt": case "customdatatype": case "datatype":
                     return explainCdt(objectName);
                 default:
@@ -350,82 +348,125 @@ public class AIExplaination {
         return header + callGroq(prompt);
     }
 
-    private String listCdts() {
-        try {
-            ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
-            ContentService cs = ServiceLocator.getContentService(sc);
-            Long root = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
-            Content[] all = cs.searchByRoot(root, null, new ContentFilter(ContentConstants.TYPE_RULE));
-            StringBuilder sb = new StringBuilder("ALL RULE SUBTYPES FOUND:\n\n");
-            java.util.Map<Integer, java.util.List<String>> bySubtype = new java.util.TreeMap<>();
-            if (all != null) {
-                for (Content c : all) {
-                    int sub = c.getSubtype() != null ? c.getSubtype() : -1;
-                    bySubtype.computeIfAbsent(sub, k -> new java.util.ArrayList<>()).add(c.getName());
-                }
-            }
-            for (java.util.Map.Entry<Integer, java.util.List<String>> e : bySubtype.entrySet()) {
-                sb.append("subtype=").append(e.getKey()).append(" (").append(e.getValue().size()).append(" objects):\n");
-                for (String n : e.getValue()) sb.append("  - ").append(n).append("\n");
-            }
-            if (bySubtype.isEmpty()) sb.append("Nothing found.");
-            return sb.toString();
-        } catch (Exception e) {
-            return "ERROR: " + e.getMessage();
-        }
-    }
-
     private String explainCdt(String name) throws Exception {
         ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
-        ContentService cs = ServiceLocator.getContentService(sc);
-        Long root = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
-        Content[] all = cs.searchByRoot(root, name, new ContentFilter(ContentConstants.TYPE_RULE));
 
-        Content match = null;
+        // CDTs are accessed via AppianTypesFactory at runtime
+        Object match = null;
         java.util.List<String> available = new java.util.ArrayList<>();
-        if (all != null) {
-            for (Content c : all) {
-                if (c.getSubtype() == null) continue;
-                if (c.getSubtype() != 7) continue; // CDT subtype
-                available.add(c.getName());
-                if (normalise(c.getName()).equals(normalise(name))) { match = c; break; }
+        String scanError = null;
+
+        try {
+            Object ts = ServiceLocator.class.getMethod("getTypeService", ServiceContext.class).invoke(null, sc);
+
+            // Use getTypeByQualifiedName with known namespace pattern
+            // Try common namespace prefixes used in Appian CDTs
+            String[] nsPrefixes = {"urn:com:appian:types:"};
+            // Extract prefix from name if it has underscore pattern like SA_Student -> SA
+            String prefix = "";
+            int underscoreIdx = name.indexOf('_');
+            if (underscoreIdx > 0) prefix = name.substring(0, underscoreIdx);
+
+            java.util.List<String> namespacesToTry = new java.util.ArrayList<>();
+            if (!prefix.isEmpty()) namespacesToTry.add("urn:com:appian:types:" + prefix);
+            namespacesToTry.add("urn:com:appian:types");
+
+            for (String ns : namespacesToTry) {
+                try {
+                    Class<?> qnameClass = Class.forName("javax.xml.namespace.QName");
+                    Object qname = qnameClass.getConstructor(String.class, String.class).newInstance(ns, name);
+                    Object dt = ts.getClass().getMethod("getTypeByQualifiedName", qnameClass).invoke(ts, qname);
+                    if (dt != null) {
+                        match = dt;
+                        break;
+                    }
+                } catch (Exception ignored) {}
             }
+
+            // If not found by qualified name, scan getTypesByNamespace
+            if (match == null && !prefix.isEmpty()) {
+                try {
+                    Object[] types = (Object[]) ts.getClass()
+                        .getMethod("getTypesByNamespace", String.class)
+                        .invoke(ts, "urn:com:appian:types:" + prefix);
+                    if (types != null) {
+                        for (Object dt : types) {
+                            String localName = safeGet(dt, "getLocalName", "");
+                            if (localName.isEmpty()) continue;
+                            if (!safeGetBool(dt, "isListType")) available.add(localName);
+                            if (normalise(localName).equals(normalise(name))) { match = dt; break; }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
+        } catch (Exception e) {
+            scanError = e.getClass().getSimpleName() + ": " + e.getMessage();
         }
 
         if (match == null) {
-            StringBuilder sb = new StringBuilder("CDT '" + name + "' not found.");
+            StringBuilder sb = new StringBuilder("CDT '" + name + "' not found.\n\n");
+            if (scanError != null) sb.append("Scan error: ").append(scanError).append("\n\n");
+            // Try to list all CDTs from the same namespace prefix
+            if (available.isEmpty() && !name.isEmpty()) {
+                try {
+                    Object ts = ServiceLocator.class.getMethod("getTypeService", ServiceContext.class).invoke(null, sc);
+                    int underscoreIdx = name.indexOf('_');
+                    String prefix = underscoreIdx > 0 ? name.substring(0, underscoreIdx) : "";
+                    if (!prefix.isEmpty()) {
+                        Object[] types = (Object[]) ts.getClass()
+                            .getMethod("getTypesByNamespace", String.class)
+                            .invoke(ts, "urn:com:appian:types:" + prefix);
+                        if (types != null) {
+                            for (Object dt : types) {
+                                if (safeGetBool(dt, "isListType")) continue;
+                                String ln = safeGet(dt, "getLocalName", "");
+                                if (!ln.isEmpty()) available.add(ln);
+                            }
+                        }
+                    }
+                } catch (Exception ignored) {}
+            }
             if (!available.isEmpty()) {
-                sb.append("\n\nSimilar CDTs found:\n");
+                sb.append("Available CDTs in same namespace:\n");
                 for (String n : available) sb.append("  - ").append(n).append("\n");
+            } else {
+                sb.append("Tip: CDT name format is PREFIX_Name (e.g. SA_Student, TAP_Employee).\nCheck exact name in Appian Designer > Data Types.");
             }
             return sb.toString();
         }
 
-        // Get full version with attributes
-        Content full = null;
-        try { full = cs.getVersion(match.getId(), ContentConstants.VERSION_CURRENT); } catch (Exception ignored) {}
-
+        // Build metadata from TypeService object
         StringBuilder metadata = new StringBuilder();
+        String cdtName = safeGet(match, "getLocalName", name);
+        String cdtDesc = safeGet(match, "getLocalDescription", safeGet(match, "getDescription", "Not provided"));
+        String cdtCreator = safeGet(match, "getCreator", "N/A");
+        String cdtCreated = safeGet(match, "getCreationTime", "N/A");
+        String cdtNs = safeGet(match, "getNamespace", "N/A");
         metadata.append("OBJECT TYPE: CDT (Custom Data Type)\n");
-        metadata.append("NAME: ").append(match.getName()).append("\n");
-        metadata.append("DESCRIPTION: ").append(match.getDescription() != null ? match.getDescription() : "Not provided").append("\n");
-        metadata.append("CREATED BY: ").append(match.getCreator() != null ? match.getCreator() : "N/A").append("\n");
-        metadata.append("CREATED ON: ").append(match.getCreatedTimestamp() != null ? match.getCreatedTimestamp().toString() : "N/A").append("\n\n");
+        metadata.append("NAME: ").append(cdtName).append("\n");
+        metadata.append("NAMESPACE: ").append(cdtNs).append("\n");
+        metadata.append("DESCRIPTION: ").append(cdtDesc).append("\n");
+        metadata.append("CREATED BY: ").append(cdtCreator).append("\n");
+        metadata.append("CREATED ON: ").append(cdtCreated).append("\n\n");
 
-        if (full != null && full.getAttributes() != null) {
-            for (String key : new String[]{"xsd", "definition", "body", "content", "expression"}) {
-                Object val = full.getAttributes().get(key);
-                if (val != null && !val.toString().trim().isEmpty()) {
-                    metadata.append("DEFINITION:\n").append(truncate(val.toString().trim(), 3000)).append("\n\n");
-                    break;
-                }
+        // Get fields via getInstanceProperties
+        Object[] props = null;
+        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception ignored) {}
+        if (props != null && props.length > 0) {
+            metadata.append("FIELDS:\n");
+            for (Object prop : props) {
+                String fName = safeGet(prop, "getLocalName", safeGet(prop, "getName", ""));
+                String fType = resolveTypeName(safeGet(prop, "getInstanceType", ""));
+                if (!fName.isEmpty())
+                    metadata.append("  - ").append(fName).append(" (").append(fType).append(")\n");
             }
+            metadata.append("\n");
         }
 
         String cdtHeader = "OBJECT TYPE: CDT (Custom Data Type)\n"
-            + "OBJECT NAME: " + match.getName() + "\n"
-            + "CREATED BY: " + (match.getCreator() != null ? match.getCreator() : "N/A") + "\n"
-            + "CREATED ON: " + (match.getCreatedTimestamp() != null ? match.getCreatedTimestamp().toString() : "N/A") + "\n"
+            + "OBJECT NAME: " + cdtName + "\n"
+            + "CREATED BY: " + cdtCreator + "\n"
+            + "CREATED ON: " + cdtCreated + "\n"
             + "---\n\n";
         String prompt = "You are a Business Analyst explaining an Appian CDT to a non-technical stakeholder.\n"
             + "Based STRICTLY on the data below, generate a structured explanation. No markdown symbols.\n\n"
