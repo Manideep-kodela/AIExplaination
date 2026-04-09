@@ -32,13 +32,12 @@ public class AIExplaination {
 
     private static final String GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions";
     private static final String GROQ_MODEL   = "llama-3.3-70b-versatile";
-    private static final String GROQ_API_KEY = System.getProperty("groq.api.key", "GROQ_API_KEY_HERE");
+    private static final String GROQ_API_KEY = "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";
 
     @Function
     public String explainAppianObject(
             @Parameter String objectType,
-            @Parameter String objectName,
-            @Parameter(required = false) String appianApiKey) {
+            @Parameter String objectName) {
 
         if (objectType == null || objectType.trim().isEmpty())
             return "ERROR: objectType is required. Supported: ProcessModel, Interface, ExpressionRule, Integration, RecordType, CDT";
@@ -57,9 +56,11 @@ public class AIExplaination {
                 case "integration": case "api":
                     return explainContent(objectName, "Integration", ContentConstants.TYPE_RULE, ContentConstants.SUBTYPE_RULE_OUTBOUND_INTEGRATION);
                 case "recordtype": case "record":
-                    return explainRecordType(objectName, appianApiKey != null ? appianApiKey.trim() : "");
+                    return explainRecordType(objectName, "");
+                case "listcdts":
+                    return listCdts();
                 case "cdt": case "customdatatype": case "datatype":
-                    return explainContent(objectName, "CDT", ContentConstants.TYPE_CUSTOM, -1);
+                    return explainCdt(objectName);
                 default:
                     return "Unsupported object type: '" + objectType + "'. Supported: ProcessModel, Interface, ExpressionRule, Integration, RecordType, CDT";
             }
@@ -320,109 +321,194 @@ public class AIExplaination {
         return callGroq(prompt);
     }
 
-    private String explainRecordType(String name, String apiKey) throws Exception {
-        if (apiKey.isEmpty())
-            return "ERROR: Appian API key is required for Record Type. Use: explainAppianObject(\"RecordType\", \"name\", \"your-api-key\")";
-
-        String baseUrl = "http://tamminademoapps.com:8228";
-        StringBuilder metadata = new StringBuilder();
-
-        // Step 1: Get all record types and find matching one
-        URL listUrl = new URL(baseUrl + "/suite/api/recordType/v1/recordTypes");
-        HttpURLConnection listConn = (HttpURLConnection) listUrl.openConnection();
-        listConn.setRequestMethod("GET");
-        listConn.setRequestProperty("Appian-API-Key", apiKey);
-        listConn.setRequestProperty("Accept", "application/json");
-        listConn.setConnectTimeout(15000);
-        listConn.setReadTimeout(15000);
-
-        int listStatus = listConn.getResponseCode();
-        if (listStatus != 200)
-            return "Appian REST API error (" + listStatus + ") fetching record types. Check your API key.";
-
-        StringBuilder listResp = new StringBuilder();
-        try (BufferedReader br = new BufferedReader(new InputStreamReader(listConn.getInputStream(), "UTF-8"))) {
-            char[] buf = new char[4096];
-            int read;
-            while ((read = br.read(buf)) != -1) listResp.append(buf, 0, read);
+    private String listCdts() {
+        try {
+            ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
+            ContentService cs = ServiceLocator.getContentService(sc);
+            Long root = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
+            Content[] all = cs.searchByRoot(root, null, new ContentFilter(ContentConstants.TYPE_RULE));
+            StringBuilder sb = new StringBuilder("ALL RULE SUBTYPES FOUND:\n\n");
+            java.util.Map<Integer, java.util.List<String>> bySubtype = new java.util.TreeMap<>();
+            if (all != null) {
+                for (Content c : all) {
+                    int sub = c.getSubtype() != null ? c.getSubtype() : -1;
+                    bySubtype.computeIfAbsent(sub, k -> new java.util.ArrayList<>()).add(c.getName());
+                }
+            }
+            for (java.util.Map.Entry<Integer, java.util.List<String>> e : bySubtype.entrySet()) {
+                sb.append("subtype=").append(e.getKey()).append(" (").append(e.getValue().size()).append(" objects):\n");
+                for (String n : e.getValue()) sb.append("  - ").append(n).append("\n");
+            }
+            if (bySubtype.isEmpty()) sb.append("Nothing found.");
+            return sb.toString();
+        } catch (Exception e) {
+            return "ERROR: " + e.getMessage();
         }
-        String listJson = listResp.toString();
+    }
 
-        // Find the record type UUID by name
-        String normName = normalise(name);
-        String matchedUuid = null;
-        String matchedName = null;
-        int idx = 0;
-        while ((idx = listJson.indexOf("\"name\"", idx)) != -1) {
-            int colon = listJson.indexOf(":", idx);
-            int q1 = listJson.indexOf("\"", colon + 1);
-            int q2 = listJson.indexOf("\"", q1 + 1);
-            if (q1 != -1 && q2 != -1) {
-                String rtName = listJson.substring(q1 + 1, q2);
-                if (normalise(rtName).equals(normName) || normalise(rtName).contains(normName)) {
-                    matchedName = rtName;
-                    // Extract uuid from nearby JSON
-                    int uuidIdx = listJson.lastIndexOf("\"uuid\"", idx);
-                    if (uuidIdx == -1) uuidIdx = listJson.indexOf("\"uuid\"", idx);
-                    if (uuidIdx != -1) {
-                        int uc = listJson.indexOf(":", uuidIdx);
-                        int uq1 = listJson.indexOf("\"", uc + 1);
-                        int uq2 = listJson.indexOf("\"", uq1 + 1);
-                        if (uq1 != -1 && uq2 != -1) matchedUuid = listJson.substring(uq1 + 1, uq2);
-                    }
+    private String explainCdt(String name) throws Exception {
+        ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
+        ContentService cs = ServiceLocator.getContentService(sc);
+        Long root = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
+        Content[] all = cs.searchByRoot(root, name, new ContentFilter(ContentConstants.TYPE_RULE));
+
+        Content match = null;
+        java.util.List<String> available = new java.util.ArrayList<>();
+        if (all != null) {
+            for (Content c : all) {
+                if (c.getSubtype() == null) continue;
+                if (c.getSubtype() != 7) continue; // CDT subtype
+                available.add(c.getName());
+                if (normalise(c.getName()).equals(normalise(name))) { match = c; break; }
+            }
+        }
+
+        if (match == null) {
+            StringBuilder sb = new StringBuilder("CDT '" + name + "' not found.");
+            if (!available.isEmpty()) {
+                sb.append("\n\nSimilar CDTs found:\n");
+                for (String n : available) sb.append("  - ").append(n).append("\n");
+            }
+            return sb.toString();
+        }
+
+        // Get full version with attributes
+        Content full = null;
+        try { full = cs.getVersion(match.getId(), ContentConstants.VERSION_CURRENT); } catch (Exception ignored) {}
+
+        StringBuilder metadata = new StringBuilder();
+        metadata.append("OBJECT TYPE: CDT (Custom Data Type)\n");
+        metadata.append("NAME: ").append(match.getName()).append("\n");
+        metadata.append("DESCRIPTION: ").append(match.getDescription() != null ? match.getDescription() : "Not provided").append("\n");
+        metadata.append("CREATED BY: ").append(match.getCreator() != null ? match.getCreator() : "N/A").append("\n");
+        metadata.append("CREATED ON: ").append(match.getCreatedTimestamp() != null ? match.getCreatedTimestamp().toString() : "N/A").append("\n\n");
+
+        if (full != null && full.getAttributes() != null) {
+            for (String key : new String[]{"xsd", "definition", "body", "content", "expression"}) {
+                Object val = full.getAttributes().get(key);
+                if (val != null && !val.toString().trim().isEmpty()) {
+                    metadata.append("DEFINITION:\n").append(truncate(val.toString().trim(), 3000)).append("\n\n");
                     break;
                 }
             }
-            idx++;
-        }
-
-        if (matchedName == null)
-            return "Record Type '" + name + "' not found. Make sure the name matches exactly as it appears in Appian Designer.";
-
-        metadata.append("OBJECT TYPE: Record Type\n");
-        metadata.append("NAME: ").append(matchedName).append("\n");
-
-        // Step 2: Get full record type details using uuid
-        if (matchedUuid != null && !matchedUuid.isEmpty()) {
-            URL detailUrl = new URL(baseUrl + "/api/recordType/v1/recordTypes/" + matchedUuid);
-            HttpURLConnection detailConn = (HttpURLConnection) detailUrl.openConnection();
-            detailConn.setRequestMethod("GET");
-            detailConn.setRequestProperty("Appian-API-Key", apiKey);
-            detailConn.setRequestProperty("Accept", "application/json");
-            detailConn.setConnectTimeout(15000);
-            detailConn.setReadTimeout(15000);
-
-            if (detailConn.getResponseCode() == 200) {
-                StringBuilder detailResp = new StringBuilder();
-                try (BufferedReader br = new BufferedReader(new InputStreamReader(detailConn.getInputStream(), "UTF-8"))) {
-                    char[] buf = new char[4096];
-                    int read;
-                    while ((read = br.read(buf)) != -1) detailResp.append(buf, 0, read);
-                }
-                metadata.append("FULL DETAILS:\n").append(truncate(detailResp.toString(), 4000)).append("\n\n");
-            }
-        } else {
-            metadata.append("RAW LIST DATA:\n").append(truncate(listJson, 4000)).append("\n\n");
         }
 
         String prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst.\n"
-            + "Explain this Appian Record Type based STRICTLY on the data provided below. Do NOT add anything not in the data.\n\n"
+            + "Explain this Appian CDT (Custom Data Type) based STRICTLY on the data provided below.\n\n"
             + "Here is the technical data:\n\n" + metadata.toString()
-            + "\n\nExplain this Record Type in a clear KT style covering:\n"
-            + "1. What this Record Type represents in the business\n"
-            + "2. What DATA SOURCE it is connected to\n"
-            + "3. What FIELDS are defined - list each field name and type\n"
-            + "4. What RECORD ACTIONS are configured - list each by exact name\n"
-            + "5. What RELATIONSHIPS exist with other record types\n"
-            + "6. What VIEWS or filters are configured\n"
-            + "7. A simple summary of how it is used in the application\n\n"
+            + "\n\nExplain this CDT in a clear professional KT style covering:\n"
+            + "1. What this CDT represents in the business - what real-world entity or data structure does it model\n"
+            + "2. What FIELDS are defined - for each field explain what business data it holds in plain English\n"
+            + "3. How this CDT is typically used in the application (as process variable, rule input, data store entity etc.)\n\n"
             + "FORMATTING RULES:\n"
             + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
             + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon\n"
             + "- Use a blank line between sections\n"
             + "- Use a dash (-) for bullet points\n"
-            + "- Keep it professional, clean and easy to read\n"
-            + "Use exact names from the data. Write in plain English. No generic Appian theory.";
+            + "- If data is not available for a section, skip that section entirely\n"
+            + "- Keep it professional, concise and easy to read\n"
+            + "Use exact field names from the data. Write in plain English. No generic Appian theory.";
+
+        return callGroq(prompt);
+    }
+
+    private String explainRecordType(String name, String apiKey) throws Exception {
+        ServiceContext sc = ServiceLocator.getAdministratorServiceContext();
+        StringBuilder metadata = new StringBuilder();
+        Object match = null;
+        java.util.List<String> rtNames = new java.util.ArrayList<>();
+
+        try {
+            Object ts = ServiceLocator.class.getMethod("getTypeService", ServiceContext.class).invoke(null, sc);
+            int startIndex = 0;
+            int batchSize = 100;
+            while (true) {
+                Object page = ts.getClass().getMethod("getTypesPaging", int.class, int.class, Integer.class, Integer.class)
+                    .invoke(ts, startIndex, batchSize, null, null);
+                if (page == null) break;
+                Object[] results = (Object[]) page.getClass().getMethod("getResults").invoke(page);
+                if (results == null || results.length == 0) break;
+                for (Object dt : results) {
+                    boolean isRT = safeGetBool(dt, "isRecordType");
+                    if (!isRT) continue;
+                    String localName = safeGet(dt, "getLocalName", safeGet(dt, "getName", ""));
+                    rtNames.add(localName);
+                    if (normalise(localName).equals(normalise(name)) || normalise(localName).contains(normalise(name))) {
+                        match = dt;
+                        break;
+                    }
+                }
+                if (match != null) break;
+                if (results.length < batchSize) break;
+                startIndex += batchSize;
+            }
+        } catch (Exception e) {
+            return "ERROR scanning types: " + e.getMessage();
+        }
+
+        if (match == null) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("Record Type '" + name + "' not found.\n\n");
+            sb.append("Available Record Types (use one of these exact names):\n");
+            for (String n2 : rtNames) sb.append("  - ").append(n2).append("\n");
+            if (rtNames.isEmpty()) sb.append("  No Record Types found.\n");
+            return sb.toString();
+        }
+
+        metadata.append("OBJECT TYPE: Record Type\n");
+        metadata.append("NAME: ").append(safeGet(match, "getLocalName", name)).append("\n");
+        metadata.append("NAMESPACE: ").append(safeGet(match, "getNamespace", "N/A")).append("\n");
+        metadata.append("DESCRIPTION: ").append(safeGet(match, "getLocalDescription", safeGet(match, "getDescription", "Not provided"))).append("\n");
+        metadata.append("CREATED BY: ").append(safeGet(match, "getCreator", "N/A")).append("\n");
+        metadata.append("CREATED ON: ").append(safeGet(match, "getCreationTime", "N/A")).append("\n\n");
+
+        // Fields
+        Object[] props = null;
+        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception ignored) {}
+        if (props != null && props.length > 0) {
+            metadata.append("FIELDS:\n");
+            for (Object prop : props) {
+                String fName = safeGet(prop, "getLocalName", safeGet(prop, "getName", ""));
+                String fTypeId = safeGet(prop, "getInstanceType", "");
+                String fType = resolveTypeName(fTypeId);
+                if (!fName.isEmpty())
+                    metadata.append("  - ").append(fName).append(" (").append(fType).append(")\n");
+            }
+            metadata.append("\n");
+        }
+
+        // Type properties (record actions, data source, views etc.)
+        Object[] typeProps = null;
+        try { typeProps = (Object[]) match.getClass().getMethod("getTypeProperties").invoke(match); } catch (Exception ignored) {}
+        if (typeProps != null && typeProps.length > 0) {
+            metadata.append("CONFIGURATION:\n");
+            for (Object tp : typeProps) {
+                String tpName = safeGet(tp, "getLocalName", safeGet(tp, "getName", ""));
+                String tpVal  = safeGet(tp, "getValue", "");
+                if (!tpName.isEmpty() && !tpVal.isEmpty())
+                    metadata.append("  - ").append(tpName).append(": ").append(truncate(tpVal, 200)).append("\n");
+            }
+            metadata.append("\n");
+        }
+
+        String prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst.\n"
+            + "Explain this Appian Record Type based STRICTLY on the data provided below. Do NOT add anything not in the data.\n\n"
+            + "Here is the technical data:\n\n" + metadata.toString()
+            + "\n\nExplain this Record Type in a clear, professional KT style covering:\n"
+            + "1. What this Record Type represents in the business - explain it like a real business entity\n"
+            + "2. What DATA SOURCE it is connected to (if available)\n"
+            + "3. What FIELDS are defined - for each field explain what business data it holds in plain English (e.g. empId stores the unique identifier of the employee, empName stores the full name of the employee)\n"
+            + "4. What RECORD ACTIONS are configured - list each by exact name (if available)\n"
+            + "5. What RELATIONSHIPS exist with other record types (if available)\n"
+            + "6. A concise business summary of how this record type is used in the application\n\n"
+            + "FORMATTING RULES:\n"
+            + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
+            + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon\n"
+            + "- Use a blank line between sections\n"
+            + "- Use a dash (-) for bullet points\n"
+            + "- If data is not available for a section, skip that section entirely - do not say 'no information provided'\n"
+            + "- Keep it professional, concise and easy to read for a Business Analyst\n"
+            + "Use exact field names from the data. Write in plain English. No generic Appian theory.";
 
         return callGroq(prompt);
     }
@@ -491,25 +577,66 @@ public class AIExplaination {
                 metadata.append("REFERENCED RULES: ").append(String.join(", ", rules)).append("\n");
         }
 
-        String prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst who has basic Appian knowledge.\n"
-            + "Explain this Appian " + displayType + " based STRICTLY on the actual code and metadata provided below. Do NOT add anything that is not in the data.\n\n"
-            + "Here is the technical data:\n\n" + metadata.toString()
-            + "\n\nExplain this " + displayType + " in a clear KT style covering:\n"
-            + "1. What is the purpose of this " + displayType + " - what does it do in simple terms\n"
-            + "2. What LAYOUTS are used (e.g. a!formLayout, a!sectionLayout, a!columnsLayout, a!cardLayout etc.) and what they contain\n"
-            + "3. What UI COMPONENTS are used (e.g. a!textField, a!dropdownField, a!buttonWidget, a!gridField, a!recordActionField etc.) - list each one and what it does\n"
-            + "4. What RULE INPUTS (ri!) are defined and how each one is used inside the interface\n"
-            + "5. What RULES (rule!), RECORD TYPES (recordType!), CONSTANTS (cons!) or other objects are referenced - list each by exact name and explain what it does in this interface\n"
-            + "6. What LOGIC or CONDITIONS exist (if(), a!localVariables, local!, choose() etc.) and what they control\n"
-            + "7. What ACTIONS or EVENTS are triggered (saveInto, a!save, submit buttons, record actions etc.)\n"
-            + "8. A simple summary of the full flow - what the analyst sees on screen and what happens when they interact with it\n\n"
-            + "FORMATTING RULES:\n"
-            + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
-            + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon, then explain in normal text below it\n"
-            + "- Use a blank line between sections\n"
-            + "- Use a dash (-) for bullet points\n"
-            + "- Keep it professional, clean and easy to read\n"
-            + "Use exact names from the code. Write in plain English. No generic Appian theory.";
+
+        String prompt;
+        if (displayType.equals("Expression Rule")) {
+            prompt = "Analyze the following Appian Expression Rule and generate a clear, structured explanation.\n\n"
+                + "-----------------------------\n"
+                + "INPUT DATA:\n"
+                + "-----------------------------\n"
+                + "Expression Rule Name: " + objName + "\n\n"
+                + metadata.toString() + "\n"
+                + "-----------------------------\n"
+                + "OUTPUT FORMAT:\n"
+                + "-----------------------------\n"
+                + "Generate the following sections. DO NOT skip any section. DO NOT add sections not listed here.\n\n"
+                + "1. PURPOSE\n"
+                + "- Why this rule exists and what business problem it solves\n\n"
+                + "2. OVERVIEW\n"
+                + "- High-level explanation of what the rule does\n"
+                + "- Type of logic (calculation / validation / transformation / decision-making)\n\n"
+                + "3. RULE INPUTS\n"
+                + "- For each ri! input found in the code: Name, inferred Data Type, what it represents in business terms\n"
+                + "- If no rule inputs exist, write: No rule inputs defined\n\n"
+                + "4. BUSINESS LOGIC EXPLANATION\n"
+                + "- Step-by-step explanation of the logic in plain English\n"
+                + "- Convert technical expressions into business-friendly language\n\n"
+                + "5. KEY CONDITIONS / DECISIONS\n"
+                + "- List every if(), choose(), or conditional logic found\n"
+                + "- Explain what each condition checks and what happens in each case\n"
+                + "- If no conditions exist, write: No conditional logic found\n\n"
+                + "6. OUTPUT / RESULT\n"
+                + "- What the rule returns\n"
+                + "- Possible output values or data type\n\n"
+                + "7. SUMMARY\n"
+                + "- Clear summary of the rule in 3-5 lines\n\n"
+                + "IMPORTANT:\n"
+                + "- Use simple English\n"
+                + "- Do NOT use ##, ###, *, ** or any markdown\n"
+                + "- Write each section heading as a number and title in PLAIN CAPITAL LETTERS\n"
+                + "- Use a dash (-) for bullet points\n"
+                + "- Be precise and easy for a non-developer to understand";
+        } else {
+            prompt = "You are a senior Appian developer doing a Knowledge Transfer (KT) session to a Business Analyst who has basic Appian knowledge.\n"
+                + "Explain this Appian " + displayType + " based STRICTLY on the actual code and metadata provided below. Do NOT add anything that is not in the data.\n\n"
+                + "Here is the technical data:\n\n" + metadata.toString()
+                + "\n\nExplain this " + displayType + " in a clear KT style covering:\n"
+                + "1. What is the purpose of this " + displayType + " - what does it do in simple terms\n"
+                + "2. What LAYOUTS are used (e.g. a!formLayout, a!sectionLayout, a!columnsLayout, a!cardLayout etc.) and what they contain\n"
+                + "3. What UI COMPONENTS are used (e.g. a!textField, a!dropdownField, a!buttonWidget, a!gridField, a!recordActionField etc.) - list each one and what it does\n"
+                + "4. What RULE INPUTS (ri!) are defined and how each one is used inside the interface\n"
+                + "5. What RULES (rule!), RECORD TYPES (recordType!), CONSTANTS (cons!) or other objects are referenced - list each by exact name and explain what it does in this interface\n"
+                + "6. What LOGIC or CONDITIONS exist (if(), a!localVariables, local!, choose() etc.) and what they control\n"
+                + "7. What ACTIONS or EVENTS are triggered (saveInto, a!save, submit buttons, record actions etc.)\n"
+                + "8. A simple summary of the full flow - what the analyst sees on screen and what happens when they interact with it\n\n"
+                + "FORMATTING RULES:\n"
+                + "- Do NOT use ##, ###, *, **, or any markdown symbols\n"
+                + "- Write each section heading in PLAIN CAPITAL LETTERS followed by a colon, then explain in normal text below it\n"
+                + "- Use a blank line between sections\n"
+                + "- Use a dash (-) for bullet points\n"
+                + "- Keep it professional, clean and easy to read\n"
+                + "Use exact names from the code. Write in plain English. No generic Appian theory.";
+        }
 
         return callGroq(prompt);
     }
@@ -564,6 +691,28 @@ public class AIExplaination {
         content = content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
         if (content.length() > 10000) content = content.substring(0, 10000) + "\n\n[Truncated]";
         return content;
+    }
+
+    private String resolveTypeName(String typeId) {
+        switch (typeId) {
+            case "1":  return "Number (Integer)";
+            case "2":  return "Number (Double)";
+            case "3":  return "Text";
+            case "4":  return "Boolean";
+            case "5":  return "Date and Time";
+            case "6":  return "Time";
+            case "7":  return "Date";
+            case "8":  return "Document";
+            case "9":  return "Folder";
+            case "10": return "Community";
+            case "11": return "User";
+            case "12": return "Group";
+            case "14": return "Process Model";
+            case "18": return "Data Store Entity";
+            case "22": return "Number (Decimal)";
+            case "26": return "Boolean";
+            default:   return typeId.isEmpty() ? "Unknown" : "Type(" + typeId + ")";
+        }
     }
 
     private String normalise(String s) {
