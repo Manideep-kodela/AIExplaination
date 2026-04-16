@@ -2,3 +2,4 @@ com/appiancs/plugins/aiexplaination/aiExplaination.properties
 target/
 *.class
 *.jar
+ai-explainer.properties

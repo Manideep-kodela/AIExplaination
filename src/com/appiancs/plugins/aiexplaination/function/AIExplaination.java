@@ -30,9 +30,19 @@ import java.util.Map;
 @AppianScriptingFunctionsCategory
 public class AIExplaination {
 
-    private static final String GROQ_URL     = "https://api.groq.com/openai/v1/chat/completions";
-    private static final String GROQ_MODEL   = "llama-3.3-70b-versatile";
-    private static final String GROQ_API_KEY = "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";
+    private static final String GROQ_URL     = "https://api.anthropic.com/v1/messages";
+    private static final String GROQ_MODEL   = "claude-haiku-4-5-20251001";
+    private static final String GROQ_API_KEY = loadApiKey();
+
+    private static String loadApiKey() {
+        try {
+            java.util.Properties props = new java.util.Properties();
+            props.load(AIExplaination.class.getResourceAsStream("/com/appiancs/plugins/aiexplaination/aiExplaination.properties"));
+            return props.getProperty("groq.api.key", "").trim();
+        } catch (Exception e) {
+            return "";
+        }
+    }
 
     @Function
     public String explainAppianObject(
@@ -737,10 +747,13 @@ public class AIExplaination {
     }
 
     private String callGroq(String prompt) throws Exception {
+        if (GROQ_API_KEY == null || GROQ_API_KEY.isEmpty())
+            return "ERROR: API key not found in aiExplaination.properties";
         URL url = new URL(GROQ_URL);
         HttpURLConnection conn = (HttpURLConnection) url.openConnection();
         conn.setRequestMethod("POST");
-        conn.setRequestProperty("Authorization", "Bearer " + GROQ_API_KEY);
+        conn.setRequestProperty("x-api-key", GROQ_API_KEY);
+        conn.setRequestProperty("anthropic-version", "2023-06-01");
         conn.setRequestProperty("Content-Type", "application/json");
         conn.setRequestProperty("User-Agent", "Mozilla/5.0");
         conn.setDoOutput(true);
@@ -752,8 +765,8 @@ public class AIExplaination {
             .replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
 
         String body = "{\"model\":\"" + GROQ_MODEL + "\","
-            + "\"messages\":[{\"role\":\"user\",\"content\":\"" + escapedPrompt + "\"}],"
-            + "\"max_tokens\":2048}";
+            + "\"max_tokens\":4096,"
+            + "\"messages\":[{\"role\":\"user\",\"content\":\"" + escapedPrompt + "\"}]}";
 
         try (OutputStream os = conn.getOutputStream()) {
             os.write(body.getBytes("UTF-8"));
@@ -769,12 +782,12 @@ public class AIExplaination {
         }
 
         if (status != 200)
-            return "Groq API error (" + status + "): " + response.toString();
+            return "Claude API error (" + status + "): " + response.toString();
 
         String json = response.toString();
-        String marker = "\"content\":\"";
+        String marker = "\"text\":\"";
         int start = json.indexOf(marker);
-        if (start == -1) return "Could not parse Groq response: " + truncate(json, 200);
+        if (start == -1) return "Could not parse Claude response: " + truncate(json, 200);
         start += marker.length();
         int end = start;
         while (end < json.length()) {
@@ -784,7 +797,7 @@ public class AIExplaination {
         }
         String content = json.substring(start, Math.min(end, json.length()));
         content = content.replace("\\n", "\n").replace("\\\"", "\"").replace("\\\\", "\\");
-        if (content.length() > 10000) content = content.substring(0, 10000) + "\n\n[Truncated]";
+        if (content.length() > 50000) content = content.substring(0, 50000) + "\n\n[Truncated]";
         return content;
     }
 
