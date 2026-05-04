@@ -8,6 +8,10 @@
     <application-version min="21.1" />
   </plugin-info>
 
-  <function key="aiExplaination" class="com.appiancs.plugins.aiexplaination.function.AIExplaination" />
+  <function-category key="aiExplainationCategory" />
+
+  <function key="aiExplaination" class="com.appiancs.plugins.aiexplaination.function.AIExplaination">
+    <category name="aiExplainationCategory" />
+  </function>
 
 </appian-plugin>
