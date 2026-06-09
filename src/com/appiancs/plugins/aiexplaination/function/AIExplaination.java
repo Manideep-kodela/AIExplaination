@@ -14,6 +14,8 @@ import com.appiancorp.suiteapi.process.forms.UiExpressionForm;
 import com.appiancorp.suiteapi.type.TypeService;
 import com.appiancorp.suiteapi.type.Datatype;
 
+import org.apache.log4j.Logger;
+
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -23,6 +25,8 @@ import java.util.*;
 
 @AppianScriptingFunctionsCategory
 public class AIExplaination {
+
+    private static final Logger LOG = Logger.getLogger(AIExplaination.class);
 
     @Function
     public String explainAppianObject(
@@ -47,6 +51,7 @@ public class AIExplaination {
             if (credentials == null || credentials.isEmpty())
                 return "ERROR: No credentials found for external system key: " + externalSystemKey;
         } catch (Exception e) {
+            LOG.error("Failed to retrieve credentials for key: " + externalSystemKey, e);
             return "ERROR: Failed to retrieve credentials: " + e.getMessage();
         }
 
@@ -77,6 +82,7 @@ public class AIExplaination {
                     return "Unsupported object type: '" + objectType + "'. Supported: ProcessModel, Interface, ExpressionRule, Integration, CDT, RecordType";
             }
         } catch (Exception e) {
+            LOG.error("Error in explainAppianObject for type=" + objectType + ", name=" + objectName, e);
             return "ERROR: " + e.getClass().getSimpleName() + " - " + e.getMessage();
         }
     }
@@ -119,7 +125,9 @@ public class AIExplaination {
                 }
             }
             metadata.append("\n");
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            LOG.warn("Could not retrieve process variables for model: " + name, e);
+        }
 
         ProcessNode[] nodes = pm.getProcessNodes();
         Map<Long, String> guiIdToName = new HashMap<>();
@@ -150,7 +158,9 @@ public class AIExplaination {
                             schemaName = localId;
                             schemaDesc = "";
                         }
-                    } catch (Exception ignored) {}
+                    } catch (Exception e) {
+                        LOG.warn("Could not get AC schema for localId: " + localId, e);
+                    }
                 }
 
                 String nodeType = localId.isEmpty() ? "Unknown" : localId;
@@ -174,7 +184,9 @@ public class AIExplaination {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Could not get parameters for node", e);
+                }
 
                 // Outputs
                 try {
@@ -187,7 +199,9 @@ public class AIExplaination {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Could not get output expressions for node", e);
+                }
 
                 // Forms (FORMS TAB)
                 try {
@@ -227,7 +241,9 @@ public class AIExplaination {
                             }
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Could not get form config for node", e);
+                }
 
                 // XOR Conditions - skip if not accessible
 
@@ -243,7 +259,9 @@ public class AIExplaination {
                             metadata.append("      -> ").append(endName).append(label).append("\n");
                         }
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Could not get connections for node", e);
+                }
             }
         }
 
@@ -332,7 +350,9 @@ public class AIExplaination {
                     if (exprObj == null) exprObj = full.getAttributes().get("body");
                     if (exprObj == null) exprObj = full.getAttributes().get("definition");
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                LOG.warn("Could not retrieve full content version for: " + name, e);
+            }
         }
         String expr = exprObj != null ? exprObj.toString().trim() : "";
 
@@ -430,6 +450,7 @@ public class AIExplaination {
                 startIndex += batchSize;
             }
         } catch (Exception e) {
+            LOG.error("Error scanning CDTs for name: " + name, e);
             return "ERROR scanning CDTs: " + e.getMessage();
         }
 
@@ -450,7 +471,9 @@ public class AIExplaination {
         metadata.append("CREATED ON: ").append(safeGet(match, "getCreationTime", "N/A")).append("\n\n");
 
         Object[] props = null;
-        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception ignored) {}
+        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception e) {
+            LOG.warn("Could not get instance properties for CDT: " + name, e);
+        }
         if (props != null && props.length > 0) {
             metadata.append("FIELDS:\n");
             for (Object prop : props) {
@@ -516,6 +539,7 @@ public class AIExplaination {
                 startIndex += batchSize;
             }
         } catch (Exception e) {
+            LOG.error("Error scanning Record Types for name: " + name, e);
             return "ERROR scanning types: " + e.getMessage();
         }
 
@@ -537,7 +561,9 @@ public class AIExplaination {
 
         // Fields
         Object[] props = null;
-        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception ignored) {}
+        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception e) {
+            LOG.warn("Could not get instance properties for RecordType: " + name, e);
+        }
         if (props != null && props.length > 0) {
             metadata.append("FIELDS:\n");
             for (Object prop : props) {
@@ -552,7 +578,9 @@ public class AIExplaination {
 
         // Type properties (record actions, data source, views etc.)
         Object[] typeProps = null;
-        try { typeProps = (Object[]) match.getClass().getMethod("getTypeProperties").invoke(match); } catch (Exception ignored) {}
+        try { typeProps = (Object[]) match.getClass().getMethod("getTypeProperties").invoke(match); } catch (Exception e) {
+            LOG.warn("Could not get type properties for RecordType: " + name, e);
+        }
         if (typeProps != null && typeProps.length > 0) {
             metadata.append("CONFIGURATION:\n");
             for (Object tp : typeProps) {
@@ -596,6 +624,7 @@ public class AIExplaination {
             Object result = obj.getClass().getMethod(methodName).invoke(obj);
             return result != null ? result.toString() : defaultValue;
         } catch (Exception e) {
+            LOG.debug("safeGet failed for method: " + methodName, e);
             return defaultValue;
         }
     }
@@ -605,6 +634,7 @@ public class AIExplaination {
             Object result = obj.getClass().getMethod(methodName).invoke(obj);
             return result != null && (Boolean) result;
         } catch (Exception e) {
+            LOG.debug("safeGetBool failed for method: " + methodName, e);
             return false;
         }
     }
@@ -713,7 +743,9 @@ public class AIExplaination {
                         }
                     }
                 }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                LOG.warn("Could not search content for name=" + name + ", type=" + type, e);
+            }
         }
         return null;
     }
