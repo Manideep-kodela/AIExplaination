@@ -20,10 +20,13 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import org.apache.log4j.Logger;
 import java.util.*;
 
 @AppianScriptingFunctionsCategory
 public class ApplicationExplainerFinal {
+
+    private static final Logger LOG = Logger.getLogger(ApplicationExplainerFinal.class);
 
     private String derivePrefix(String name) {
         if (name == null || name.trim().isEmpty()) return "";
@@ -54,6 +57,7 @@ public class ApplicationExplainerFinal {
             if (credentials == null || credentials.isEmpty())
                 return "ERROR: No credentials found for external system key: " + externalSystemKey;
         } catch (Exception e) {
+            LOG.error("Failed to retrieve credentials for key: " + externalSystemKey, e);
             return "ERROR: Failed to retrieve credentials: " + e.getMessage();
         }
 
@@ -76,14 +80,18 @@ public class ApplicationExplainerFinal {
             try {
                 app = as.getApplication(applicationName.trim());
                 if (app != null) { appUuid = app.getUuid(); found = true; }
-            } catch (Exception ignored) {}
+            } catch (Exception e) {
+                LOG.debug("Direct lookup failed for app name: " + applicationName, e);
+            }
 
             // 2. Try getApplicationByUuid in case it's a real UUID
             if (!found) {
                 try {
                     app = as.getApplicationByUuid(applicationName.trim());
                     if (app != null) { appUuid = app.getUuid(); found = true; }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.debug("UUID lookup failed for: " + applicationName, e);
+                }
             }
 
             // 3. Fallback: page through ALL applications using availableItems count
@@ -131,7 +139,9 @@ public class ApplicationExplainerFinal {
                         }
                         startIndex += batchSize;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Error during application paging search for: " + applicationName, e);
+                }
             }
             
             if (app == null) {
@@ -157,7 +167,9 @@ public class ApplicationExplainerFinal {
                         si += batchSize;
                         if (si >= total) break;
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    LOG.warn("Error listing available applications", e);
+                }
                 return availableApps.toString();
             }
 
@@ -183,6 +195,7 @@ public class ApplicationExplainerFinal {
                     for (Object item : (Set<?>) result)
                         if (item != null) pmUuids.add(item.toString());
             } catch (Exception e) {
+                LOG.warn("Could not retrieve process model UUIDs for app: " + appName, e);
                 metadata.append("Note: Could not retrieve process model UUIDs: ").append(e.getMessage()).append("\n");
             }
 
@@ -214,6 +227,7 @@ public class ApplicationExplainerFinal {
                     }
                 }
             } catch (Exception e) {
+                LOG.warn("Could not resolve content items for app: " + appName, e);
                 metadata.append("Note: Could not resolve content items: ").append(e.getMessage()).append("\n");
             }
 
@@ -252,6 +266,7 @@ public class ApplicationExplainerFinal {
                     }
                 }
             } catch (Exception e) {
+                LOG.error("Error reading Process Models for app: " + appName, e);
                 metadata.append("ERROR reading Process Models: ").append(e.getMessage()).append("\n");
             }
 
@@ -261,6 +276,7 @@ public class ApplicationExplainerFinal {
                 Long rulesRoot = cs.getSystemId(ContentConstants.RULES_ROOT_SYSTEM_ID);
                 allRulesContent = cs.searchByRoot(rulesRoot, "%", new ContentFilter(ContentConstants.TYPE_RULE));
             } catch (Exception e) {
+                LOG.error("Error reading rules content", e);
                 metadata.append("ERROR reading rules content: ").append(e.getMessage()).append("\n");
             }
 
@@ -286,6 +302,7 @@ public class ApplicationExplainerFinal {
                         }
                     }
                 } catch (Exception e) {
+                    LOG.error("Error reading Interfaces", e);
                     metadata.append("ERROR reading Interfaces: ").append(e.getMessage()).append("\n");
                 }
             }
@@ -312,6 +329,7 @@ public class ApplicationExplainerFinal {
                         }
                     }
                 } catch (Exception e) {
+                    LOG.error("Error reading Expression Rules", e);
                     metadata.append("ERROR reading Expression Rules: ").append(e.getMessage()).append("\n");
                 }
             }
@@ -338,6 +356,7 @@ public class ApplicationExplainerFinal {
                         }
                     }
                 } catch (Exception e) {
+                    LOG.error("Error reading Integrations", e);
                     metadata.append("ERROR reading Integrations: ").append(e.getMessage()).append("\n");
                 }
             }
@@ -513,6 +532,7 @@ public class ApplicationExplainerFinal {
             return header + callAI(prompt, apiKey, provider);
 
         } catch (Exception e) {
+            LOG.error("Unexpected error in explainApplication for: " + applicationName, e);
             return "ERROR: " + e.getClass().getSimpleName() + " - " + e.getMessage();
         }
     }

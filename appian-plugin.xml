@@ -4,8 +4,8 @@
   <plugin-info>
     <description>Explains Appian objects with metadata and structured summaries.</description>
     <vendor name="AppianCS" url="https://www.appian.com" />
-    <version>1.5.0</version>
-    <application-version min="21.1" />
+    <version>1.6.0</version>
+    <application-version min="23.1" />
   </plugin-info>
 
   <function-category key="aiExplainationCategory" />
