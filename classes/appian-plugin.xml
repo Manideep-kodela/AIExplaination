@@ -1,0 +1,21 @@
+<appian-plugin name="Appian AI Lens" key="com.techtammina.plugins.appianailens"
+               xmlns="http://www.appian.com/schemas/appian-plugin/1.0">
+
+  <plugin-info>
+    <description>Explains Appian objects using AI. Supports ProcessModel, Interface, ExpressionRule, Integration, RecordType and CDT.</description>
+    <vendor name="Tech Tammina" url="https://www.techtammina.com" />
+    <version>1.1.0</version>
+    <application-version min="23.2" />
+  </plugin-info>
+
+  <function-category key="aiExplainationCategory" />
+
+  <function key="aiExplainAppianObject" class="com.techtammina.plugins.appianailens.function.AIExplaination">
+    <category name="aiExplainationCategory" />
+  </function>
+
+  <function key="explainApplication" class="com.techtammina.plugins.appianailens.function.ApplicationExplainerFinal">
+    <category name="aiExplainationCategory" />
+  </function>
+
+</appian-plugin>
