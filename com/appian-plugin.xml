@@ -4,7 +4,7 @@
   <plugin-info>
     <description>Explains Appian objects with metadata and structured summaries.</description>
     <vendor name="AppianCS" url="https://www.appian.com" />
-    <version>1.6.0</version>
+    <version>1.5.0</version>
     <application-version min="21.1" />
   </plugin-info>
 
@@ -15,10 +15,6 @@
   </function>
 
   <function key="explainApplication" class="com.appiancs.plugins.aiexplaination.function.ApplicationExplainerFinal">
-    <category name="aiExplainationCategory" />
-  </function>
-
-  <function key="generateApplicationKT" class="com.appiancs.plugins.aiexplaination.function.ApplicationKTDocumentGenerator">
     <category name="aiExplainationCategory" />
   </function>
 

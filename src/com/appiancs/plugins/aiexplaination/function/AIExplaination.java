@@ -393,130 +393,124 @@ public class AIExplaination {
     }
 
     private String explainCDT(TypeService ts, String name, String apiKey, String provider) throws Exception {
-        Datatype match = null;
-        java.util.List<String> available = new java.util.ArrayList<>();
-        
-        try {
-            String prefix = "";
-            int underscoreIdx = name.indexOf('_');
-            if (underscoreIdx > 0) prefix = name.substring(0, underscoreIdx);
-            
-            if (!prefix.isEmpty()) {
-                try {
-                    javax.xml.namespace.QName qname = new javax.xml.namespace.QName("urn:com:appian:types:" + prefix, name);
-                    match = ts.getTypeByQualifiedName(qname);
-                } catch (Exception ignored) {}
-            }
-            
-            if (match == null && !prefix.isEmpty()) {
-                try {
-                    Datatype[] types = ts.getTypesByNamespace("urn:com:appian:types:" + prefix);
-                    if (types != null) {
-                        for (Datatype dt : types) {
-                            String localName = dt.getName();
-                            if (localName == null || localName.isEmpty()) continue;
-                            if (!dt.isListType()) available.add(localName);
-                            if (normalise(localName).equals(normalise(name))) {
-                                match = dt;
-                                break;
-                            }
-                        }
-                    }
-                } catch (Exception ignored) {}
-            }
-        } catch (Exception e) {
-            return "ERROR accessing CDT: " + e.getMessage();
-        }
-        
-        if (match == null) {
-            StringBuilder sb = new StringBuilder("CDT '" + name + "' not found.\n\n");
-            if (!available.isEmpty()) {
-                sb.append("Available CDTs in same namespace:\n");
-                for (String n : available) sb.append("  - ").append(n).append("\n");
-            } else {
-                sb.append("Tip: CDT name format is PREFIX_Name (e.g. SA_Student).\n");
-            }
-            return sb.toString();
-        }
-        
         StringBuilder metadata = new StringBuilder();
-        String cdtName = match.getName() != null ? match.getName() : name;
-        String cdtDesc = match.getDescription() != null ? match.getDescription() : "Not provided";
-        String cdtNs = match.getNamespace() != null ? match.getNamespace() : "N/A";
-        
-        metadata.append("CDT NAME: ").append(cdtName).append("\n");
-        metadata.append("NAMESPACE: ").append(cdtNs).append("\n");
-        metadata.append("DESCRIPTION: ").append(cdtDesc).append("\n\n");
-        
-        // Extract fields
+        Object match = null;
+        java.util.List<String> cdtNames = new java.util.ArrayList<>();
+
         try {
-            Object[] fields = match.getInstanceProperties();
-            if (fields != null && fields.length > 0) {
-                metadata.append("FIELDS:\n");
-                for (Object field : fields) {
-                    if (field != null) {
-                        metadata.append("  - ").append(field.toString()).append("\n");
+            // Use reflection to access getTypesPaging method
+            int startIndex = 0, batchSize = 100;
+            while (true) {
+                Object page = ts.getClass().getMethod("getTypesPaging", int.class, int.class, Integer.class, Integer.class)
+                    .invoke(ts, startIndex, batchSize, null, null);
+                if (page == null) break;
+                Object[] results = (Object[]) page.getClass().getMethod("getResults").invoke(page);
+                if (results == null || results.length == 0) break;
+                for (Object dt : results) {
+                    if (safeGetBool(dt, "isRecordType")) continue;
+                    if (safeGetBool(dt, "isSystemType")) continue;
+                    if (safeGetBool(dt, "isListType")) continue;
+                    if (safeGetBool(dt, "isExternal")) continue;
+                    String ns = safeGet(dt, "getNamespace", "");
+                    if (!ns.contains("appian:types")) continue;
+
+                    // getNameWithinNamespace returns "SA_Student" or "SA_Student?list" - strip ?list
+                    String withinNs = safeGet(dt, "getNameWithinNamespace", "");
+                    if (withinNs.contains("?")) withinNs = withinNs.substring(0, withinNs.indexOf("?"));
+                    if (withinNs.isEmpty()) continue;
+
+                    cdtNames.add(withinNs);
+
+                    if (normalise(withinNs).equals(normalise(name)) || normalise(withinNs).contains(normalise(name))) {
+                        match = dt; break;
                     }
                 }
-                metadata.append("\n");
+                if (match != null) break;
+                if (results.length < batchSize) break;
+                startIndex += batchSize;
             }
-        } catch (Exception ignored) {}
-        
-        String cdtHeader = "OBJECT TYPE: CDT (Custom Data Type)\n"
-            + "OBJECT NAME: " + cdtName + "\n"
+        } catch (Exception e) {
+            return "ERROR scanning CDTs: " + e.getMessage();
+        }
+
+        if (match == null) {
+            StringBuilder sb = new StringBuilder("CDT '" + name + "' not found.\n\nAvailable CDTs:\n");
+            for (String n2 : cdtNames) sb.append("  - ").append(n2).append("\n");
+            if (cdtNames.isEmpty()) sb.append("  No CDTs found.\n");
+            return sb.toString();
+        }
+
+        metadata.append("OBJECT TYPE: CDT (Custom Data Type)\n");
+        String cdtDisplayName = safeGet(match, "getNameWithinNamespace", safeGet(match, "getLocalName", name));
+        if (cdtDisplayName.contains("?")) cdtDisplayName = cdtDisplayName.substring(0, cdtDisplayName.indexOf("?"));
+        metadata.append("NAME: ").append(cdtDisplayName).append("\n");
+        metadata.append("NAMESPACE: ").append(safeGet(match, "getNamespace", "N/A")).append("\n");
+        metadata.append("DESCRIPTION: ").append(safeGet(match, "getLocalDescription", safeGet(match, "getDescription", "Not provided"))).append("\n");
+        metadata.append("CREATED BY: ").append(safeGet(match, "getCreator", "N/A")).append("\n");
+        metadata.append("CREATED ON: ").append(safeGet(match, "getCreationTime", "N/A")).append("\n\n");
+
+        Object[] props = null;
+        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception ignored) {}
+        if (props != null && props.length > 0) {
+            metadata.append("FIELDS:\n");
+            for (Object prop : props) {
+                String fName = safeGet(prop, "getLocalName", safeGet(prop, "getName", ""));
+                String fType = resolveTypeName(safeGet(prop, "getInstanceType", ""));
+                if (!fName.isEmpty())
+                    metadata.append("  - ").append(fName).append(" (").append(fType).append(")\n");
+            }
+            metadata.append("\n");
+        }
+
+        String header = "OBJECT TYPE: CDT (Custom Data Type)\n"
+            + "OBJECT NAME: " + cdtDisplayName + "\n"
+            + "NAMESPACE: " + safeGet(match, "getNamespace", "N/A") + "\n"
             + "---\n\n";
-            
-        String prompt = "You are a Business Analyst explaining an Appian CDT to a non-technical stakeholder.\n"
-            + "Based STRICTLY on the data below, generate a comprehensive structured explanation.\n"
+
+        String prompt = "You are a Business Analyst explaining an Appian CDT (Custom Data Type) to a non-technical stakeholder.\n"
+            + "Based STRICTLY on the data below, generate a comprehensive explanation.\n"
             + "Do NOT use markdown symbols (##, **, *, --)\n\n"
             + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
             + "Generate a detailed explanation with these sections:\n\n"
-            + "1. PURPOSE - What business entity this represents\n"
-            + "2. INPUTS - Typical fields this CDT would contain\n"
-            + "3. OUTPUTS - What data it makes available\n"
-            + "4. FUNCTIONALITIES - How it's used in the application\n"
-            + "5. BUSINESS FLOW - Lifecycle of this CDT\n"
-            + "6. LOGIC / BEHAVIOR - Field relationships and validations\n"
-            + "7. DEPENDENCIES - What references this CDT\n"
-            + "8. BUSINESS IMPACT - Business value it provides\n"
-            + "9. SUMMARY - Comprehensive 3-5 sentence summary\n\n"
+            + "1. PURPOSE - What business data structure does this CDT represent?\n"
+            + "2. FIELDS - List each field and explain what business data it stores\n"
+            + "3. BUSINESS USE CASES - How is this CDT used in the application?\n"
+            + "4. DATA RELATIONSHIPS - How does this relate to other data structures?\n"
+            + "5. BUSINESS VALUE - Why is this CDT important?\n"
+            + "6. SUMMARY - Comprehensive 3-5 sentence summary\n\n"
             + "RULES:\n"
             + "- Plain CAPITAL headings, dash (-) for bullets, no markdown\n"
-            + "- Simple English, focus on business value\n"
-            + "- Be thorough and detailed";
-            
-        return cdtHeader + callAI(prompt, apiKey, provider);
+            + "- Simple English, focus on business meaning\n"
+            + "- Use exact field names from the data";
+
+        return header + callAI(prompt, apiKey, provider);
     }
 
     private String explainRecordType(TypeService ts, String name, String apiKey, String provider) throws Exception {
-        Datatype match = null;
+        StringBuilder metadata = new StringBuilder();
+        Object match = null;
         java.util.List<String> rtNames = new java.util.ArrayList<>();
-        
+
         try {
+            // Use reflection to access getTypesPaging method
             int startIndex = 0;
             int batchSize = 100;
             while (true) {
-                com.appiancorp.suiteapi.common.ResultPage page = ts.getTypesPaging(startIndex, batchSize, null, null);
+                Object page = ts.getClass().getMethod("getTypesPaging", int.class, int.class, Integer.class, Integer.class)
+                    .invoke(ts, startIndex, batchSize, null, null);
                 if (page == null) break;
-                
-                Object[] results = page.getResults();
+                Object[] results = (Object[]) page.getClass().getMethod("getResults").invoke(page);
                 if (results == null || results.length == 0) break;
-                
-                for (Object obj : results) {
-                    if (!(obj instanceof Datatype)) continue;
-                    Datatype dt = (Datatype) obj;
-                    
-                    if (!dt.isRecordType()) continue;
-                    
-                    String localName = dt.getName() != null ? dt.getName() : "";
+                for (Object dt : results) {
+                    boolean isRT = safeGetBool(dt, "isRecordType");
+                    if (!isRT) continue;
+                    String localName = safeGet(dt, "getLocalName", safeGet(dt, "getName", ""));
                     rtNames.add(localName);
-                    
                     if (normalise(localName).equals(normalise(name)) || normalise(localName).contains(normalise(name))) {
                         match = dt;
                         break;
                     }
                 }
-                
                 if (match != null) break;
                 if (results.length < batchSize) break;
                 startIndex += batchSize;
@@ -524,59 +518,95 @@ public class AIExplaination {
         } catch (Exception e) {
             return "ERROR scanning types: " + e.getMessage();
         }
-        
+
         if (match == null) {
             StringBuilder sb = new StringBuilder();
             sb.append("Record Type '" + name + "' not found.\n\n");
-            sb.append("Available Record Types:\n");
+            sb.append("Available Record Types (use one of these exact names):\n");
             for (String n2 : rtNames) sb.append("  - ").append(n2).append("\n");
             if (rtNames.isEmpty()) sb.append("  No Record Types found.\n");
             return sb.toString();
         }
-        
-        StringBuilder metadata = new StringBuilder();
-        metadata.append("RECORD TYPE NAME: ").append(match.getName() != null ? match.getName() : name).append("\n");
-        metadata.append("NAMESPACE: ").append(match.getNamespace() != null ? match.getNamespace() : "N/A").append("\n");
-        metadata.append("DESCRIPTION: ").append(match.getDescription() != null ? match.getDescription() : "Not provided").append("\n\n");
-        
-        // Extract fields
-        try {
-            Object[] fields = match.getInstanceProperties();
-            if (fields != null && fields.length > 0) {
-                metadata.append("FIELDS:\n");
-                for (Object field : fields) {
-                    if (field != null) {
-                        metadata.append("  - ").append(field.toString()).append("\n");
-                    }
-                }
-                metadata.append("\n");
+
+        metadata.append("OBJECT TYPE: Record Type\n");
+        metadata.append("NAME: ").append(safeGet(match, "getLocalName", name)).append("\n");
+        metadata.append("NAMESPACE: ").append(safeGet(match, "getNamespace", "N/A")).append("\n");
+        metadata.append("DESCRIPTION: ").append(safeGet(match, "getLocalDescription", safeGet(match, "getDescription", "Not provided"))).append("\n");
+        metadata.append("CREATED BY: ").append(safeGet(match, "getCreator", "N/A")).append("\n");
+        metadata.append("CREATED ON: ").append(safeGet(match, "getCreationTime", "N/A")).append("\n\n");
+
+        // Fields
+        Object[] props = null;
+        try { props = (Object[]) match.getClass().getMethod("getInstanceProperties").invoke(match); } catch (Exception ignored) {}
+        if (props != null && props.length > 0) {
+            metadata.append("FIELDS:\n");
+            for (Object prop : props) {
+                String fName = safeGet(prop, "getLocalName", safeGet(prop, "getName", ""));
+                String fTypeId = safeGet(prop, "getInstanceType", "");
+                String fType = resolveTypeName(fTypeId);
+                if (!fName.isEmpty())
+                    metadata.append("  - ").append(fName).append(" (").append(fType).append(")\n");
             }
-        } catch (Exception ignored) {}
-        
-        String rtHeader = "OBJECT TYPE: Record Type\n"
-            + "OBJECT NAME: " + (match.getName() != null ? match.getName() : name) + "\n"
+            metadata.append("\n");
+        }
+
+        // Type properties (record actions, data source, views etc.)
+        Object[] typeProps = null;
+        try { typeProps = (Object[]) match.getClass().getMethod("getTypeProperties").invoke(match); } catch (Exception ignored) {}
+        if (typeProps != null && typeProps.length > 0) {
+            metadata.append("CONFIGURATION:\n");
+            for (Object tp : typeProps) {
+                String tpName = safeGet(tp, "getLocalName", safeGet(tp, "getName", ""));
+                String tpVal  = safeGet(tp, "getValue", "");
+                if (!tpName.isEmpty() && !tpVal.isEmpty())
+                    metadata.append("  - ").append(tpName).append(": ").append(truncate(tpVal, 200)).append("\n");
+            }
+            metadata.append("\n");
+        }
+
+        String header = "OBJECT TYPE: Record Type\n"
+            + "OBJECT NAME: " + safeGet(match, "getLocalName", name) + "\n"
+            + "NAMESPACE: " + safeGet(match, "getNamespace", "N/A") + "\n"
             + "---\n\n";
-            
+
         String prompt = "You are a Business Analyst explaining an Appian Record Type to a non-technical stakeholder.\n"
-            + "Based STRICTLY on the data below, generate a comprehensive structured explanation.\n"
+            + "Based STRICTLY on the data below, generate a comprehensive explanation.\n"
             + "Do NOT use markdown symbols (##, **, *, --)\n\n"
             + "TECHNICAL DATA:\n" + metadata.toString() + "\n\n"
             + "Generate a detailed explanation with these sections:\n\n"
-            + "1. PURPOSE - What business object this represents\n"
-            + "2. INPUTS - Typical fields this Record Type contains\n"
-            + "3. OUTPUTS - Views, reports, actions it exposes\n"
-            + "4. FUNCTIONALITIES - Key features and capabilities\n"
-            + "5. BUSINESS FLOW - Lifecycle of a record instance\n"
-            + "6. LOGIC / BEHAVIOR - Data source, relationships, rules\n"
-            + "7. DEPENDENCIES - Related actions, processes, rules\n"
-            + "8. BUSINESS IMPACT - Business value it delivers\n"
-            + "9. SUMMARY - Comprehensive 3-5 sentence summary\n\n"
+            + "1. PURPOSE - What business entity does this record type represent?\n"
+            + "2. DATA SOURCE - What database table or data source is connected?\n"
+            + "3. FIELDS - List each field and explain what business data it stores\n"
+            + "4. RECORD ACTIONS - What actions are configured (if any)?\n"
+            + "5. RELATIONSHIPS - How does this relate to other record types?\n"
+            + "6. BUSINESS USE CASES - How is this record type used in the application?\n"
+            + "7. BUSINESS VALUE - Why is this record type important?\n"
+            + "8. SUMMARY - Comprehensive 3-5 sentence summary\n\n"
             + "RULES:\n"
             + "- Plain CAPITAL headings, dash (-) for bullets, no markdown\n"
-            + "- Simple English, focus on business value\n"
-            + "- Be thorough and detailed";
-            
-        return rtHeader + callAI(prompt, apiKey, provider);
+            + "- Simple English, focus on business meaning\n"
+            + "- Use exact field names from the data\n"
+            + "- If data is not available for a section, skip it";
+
+        return header + callAI(prompt, apiKey, provider);
+    }
+    
+    private String safeGet(Object obj, String methodName, String defaultValue) {
+        try {
+            Object result = obj.getClass().getMethod(methodName).invoke(obj);
+            return result != null ? result.toString() : defaultValue;
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+    
+    private boolean safeGetBool(Object obj, String methodName) {
+        try {
+            Object result = obj.getClass().getMethod(methodName).invoke(obj);
+            return result != null && (Boolean) result;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private String callAI(String prompt, String apiKey, String provider) throws Exception {

@@ -1,0 +1,4 @@
+Manifest-Version: 1.0
+Appian-Plugin: true
+Created-By: 1.8.0_471 (Oracle Corporation)
+

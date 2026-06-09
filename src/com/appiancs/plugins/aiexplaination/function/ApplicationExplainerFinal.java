@@ -186,7 +186,38 @@ public class ApplicationExplainerFinal {
                 metadata.append("Note: Could not retrieve process model UUIDs: ").append(e.getMessage()).append("\n");
             }
 
-            metadata.append("Total process models in application: ").append(pmUuids.size()).append("\n\n");
+            metadata.append("Total process models in application: ").append(pmUuids.size()).append("\n");
+
+            // Get content item UUIDs and resolve to Content objects
+            Set<Content> appContentObjects = new HashSet<>();
+            try {
+                java.lang.reflect.Method method = app.getClass().getMethod("getObjectsByType", Long.class);
+                Object result = method.invoke(app, AppianTypeLong.CONTENT_ITEM);
+                if (result instanceof Set) {
+                    Set<?> uuidSet = (Set<?>) result;
+                    if (!uuidSet.isEmpty()) {
+                        String[] uuids = new String[uuidSet.size()];
+                        int i = 0;
+                        for (Object item : uuidSet)
+                            if (item != null) uuids[i++] = item.toString();
+                        Long[] ids = cs.getIdsByUuid(uuids);
+                        if (ids != null && ids.length > 0) {
+                            java.util.List<Long> validIds = new java.util.ArrayList<>();
+                            for (Long id : ids) if (id != null) validIds.add(id);
+                            if (!validIds.isEmpty()) {
+                                Content[] contents = cs.getContent(validIds.toArray(new Long[0]));
+                                if (contents != null)
+                                    for (Content c : contents)
+                                        if (c != null) appContentObjects.add(c);
+                            }
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                metadata.append("Note: Could not resolve content items: ").append(e.getMessage()).append("\n");
+            }
+
+            metadata.append("Total content objects resolved: ").append(appContentObjects.size()).append("\n\n");
 
             // Use prefix-based filtering (most reliable with current SDK)
             int pmCount = 0, interfaceCount = 0, ruleCount = 0, integrationCount = 0, cdtCount = 0, recordCount = 0;
@@ -239,8 +270,16 @@ public class ApplicationExplainerFinal {
                     for (Content c : allRulesContent) {
                         if (c.getSubtype() != null && c.getSubtype() == ContentConstants.SUBTYPE_RULE_INTERFACE) {
                             String ifName = c.getName();
-                            if (ifName != null && !appPrefix.isEmpty() &&
-                                (ifName.startsWith(appPrefix + "_") || ifName.startsWith(appPrefix + " "))) {
+                            if (ifName == null) continue;
+                            boolean matches = false;
+                            // Method 1: Match by resolved content objects from application
+                            for (Content ac : appContentObjects) {
+                                if (ac.getId() != null && ac.getId().equals(c.getId())) { matches = true; break; }
+                            }
+                            // Method 2: Also check prefix if not matched by UUID
+                            if (!matches && !appPrefix.isEmpty())
+                                matches = ifName.startsWith(appPrefix + "_") || ifName.startsWith(appPrefix + " ");
+                            if (matches) {
                                 interfaceCount++;
                                 interfaceDetails.put(ifName, "Created by: " + (c.getCreator() != null ? c.getCreator() : "N/A"));
                             }
@@ -257,8 +296,16 @@ public class ApplicationExplainerFinal {
                     for (Content c : allRulesContent) {
                         if (c.getSubtype() != null && c.getSubtype() == ContentConstants.SUBTYPE_RULE_FREEFORM) {
                             String ruleName = c.getName();
-                            if (ruleName != null && !appPrefix.isEmpty() &&
-                                (ruleName.startsWith(appPrefix + "_") || ruleName.startsWith(appPrefix + " "))) {
+                            if (ruleName == null) continue;
+                            boolean matches = false;
+                            // Method 1: Match by UUID
+                            for (Content ac : appContentObjects) {
+                                if (ac.getId() != null && ac.getId().equals(c.getId())) { matches = true; break; }
+                            }
+                            // Method 2: Also check prefix if not matched by UUID
+                            if (!matches && !appPrefix.isEmpty())
+                                matches = ruleName.startsWith(appPrefix + "_") || ruleName.startsWith(appPrefix + " ");
+                            if (matches) {
                                 ruleCount++;
                                 ruleDetails.put(ruleName, "Created by: " + (c.getCreator() != null ? c.getCreator() : "N/A"));
                             }
@@ -275,8 +322,16 @@ public class ApplicationExplainerFinal {
                     for (Content c : allRulesContent) {
                         if (c.getSubtype() != null && c.getSubtype() == ContentConstants.SUBTYPE_RULE_OUTBOUND_INTEGRATION) {
                             String intName = c.getName();
-                            if (intName != null && !appPrefix.isEmpty() &&
-                                (intName.startsWith(appPrefix + "_") || intName.startsWith(appPrefix + " "))) {
+                            if (intName == null) continue;
+                            boolean matches = false;
+                            // Method 1: Match by UUID
+                            for (Content ac : appContentObjects) {
+                                if (ac.getId() != null && ac.getId().equals(c.getId())) { matches = true; break; }
+                            }
+                            // Method 2: Also check prefix if not matched by UUID
+                            if (!matches && !appPrefix.isEmpty())
+                                matches = intName.startsWith(appPrefix + "_") || intName.startsWith(appPrefix + " ");
+                            if (matches) {
                                 integrationCount++;
                                 integrationDetails.put(intName, "Created by: " + (c.getCreator() != null ? c.getCreator() : "N/A"));
                             }
@@ -287,51 +342,53 @@ public class ApplicationExplainerFinal {
                 }
             }
 
-            // CDTs
-            try {
-                if (!appPrefix.isEmpty()) {
-                    String namespace = "urn:com:appian:types:" + appPrefix;
-                    Datatype[] cdts = ts.getTypesByNamespace(namespace);
-                    
-                    if (cdts != null) {
-                        for (Datatype dt : cdts) {
-                            if (!dt.isListType() && !dt.isRecordType()) {
-                                String cdtName = dt.getName();
-                                if (cdtName != null) {
-                                    cdtCount++;
-                                    String desc = dt.getDescription() != null ? dt.getDescription() : "No description";
-                                    cdtDetails.put(cdtName, desc);
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                metadata.append("ERROR reading CDTs: ").append(e.getMessage()).append("\n");
-            }
+            // CDTs - skipped due to SDK limitations
+            // try {
+            //     if (!appPrefix.isEmpty()) {
+            //         String namespace = "urn:com:appian:types:" + appPrefix;
+            //         Datatype[] cdts = ts.getTypesByNamespace(namespace);
+            //         if (cdts != null) {
+            //             for (Datatype dt : cdts) {
+            //                 try {
+            //                     if (!dt.isListType() && !dt.isRecordType()) {
+            //                         String cdtName = dt.getName();
+            //                         if (cdtName != null) {
+            //                             cdtCount++;
+            //                             String desc = dt.getDescription() != null ? dt.getDescription() : "No description";
+            //                             cdtDetails.put(cdtName, desc);
+            //                         }
+            //                     }
+            //                 } catch (Exception ignored) {}
+            //             }
+            //         }
+            //     }
+            // } catch (Exception e) {
+            //     metadata.append("ERROR reading CDTs: ").append(e.getMessage()).append("\n");
+            // }
 
-            // Record Types
-            try {
-                if (!appPrefix.isEmpty()) {
-                    String namespace = "urn:com:appian:types:" + appPrefix;
-                    Datatype[] records = ts.getTypesByNamespace(namespace);
-                    
-                    if (records != null) {
-                        for (Datatype dt : records) {
-                            if (dt.isRecordType()) {
-                                String recName = dt.getName();
-                                if (recName != null) {
-                                    recordCount++;
-                                    String desc = dt.getDescription() != null ? dt.getDescription() : "No description";
-                                    recordDetails.put(recName, desc);
-                                }
-                            }
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                metadata.append("ERROR reading Record Types: ").append(e.getMessage()).append("\n");
-            }
+            // Record Types - skipped due to SDK limitations
+            // try {
+            //     if (!appPrefix.isEmpty()) {
+            //         String namespace = "urn:com:appian:types:" + appPrefix;
+            //         Datatype[] records = ts.getTypesByNamespace(namespace);
+            //         if (records != null) {
+            //             for (Datatype dt : records) {
+            //                 try {
+            //                     if (dt.isRecordType()) {
+            //                         String recName = dt.getName();
+            //                         if (recName != null) {
+            //                             recordCount++;
+            //                             String desc = dt.getDescription() != null ? dt.getDescription() : "No description";
+            //                             recordDetails.put(recName, desc);
+            //                         }
+            //                     }
+            //                 } catch (Exception ignored) {}
+            //             }
+            //         }
+            //     }
+            // } catch (Exception e) {
+            //     metadata.append("ERROR reading Record Types: ").append(e.getMessage()).append("\n");
+            // }
 
             // Build detailed metadata
             metadata.append("=== PROCESS MODELS (").append(pmCount).append(") ===\n");
