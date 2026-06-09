@@ -1,20 +1,20 @@
-<appian-plugin name="Appian Object Explainer" key="com.appiancs.plugins.aiexplaination"
+<appian-plugin name="Appian AI Lens" key="com.techtammina.plugins.appianailens"
                xmlns="http://www.appian.com/schemas/appian-plugin/1.0">
 
   <plugin-info>
-    <description>Explains Appian objects with metadata and structured summaries.</description>
-    <vendor name="AppianCS" url="https://www.appian.com" />
-    <version>1.6.0</version>
-    <application-version min="23.1" />
+    <description>Explains Appian objects using AI. Supports ProcessModel, Interface, ExpressionRule, Integration, RecordType and CDT.</description>
+    <vendor name="Tech Tammina" url="https://www.techtammina.com" />
+    <version>1.1.0</version>
+    <application-version min="23.2" />
   </plugin-info>
 
   <function-category key="aiExplainationCategory" />
 
-  <function key="aiExplaination" class="com.appiancs.plugins.aiexplaination.function.AIExplaination">
+  <function key="aiExplainAppianObject" class="com.techtammina.plugins.appianailens.function.AIExplaination">
     <category name="aiExplainationCategory" />
   </function>
 
-  <function key="explainApplication" class="com.appiancs.plugins.aiexplaination.function.ApplicationExplainerFinal">
+  <function key="explainApplication" class="com.techtammina.plugins.appianailens.function.ApplicationExplainerFinal">
     <category name="aiExplainationCategory" />
   </function>
 
